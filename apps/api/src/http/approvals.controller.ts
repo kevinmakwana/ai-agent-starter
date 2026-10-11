@@ -1,14 +1,16 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query, UseGuards } from '@nestjs/common';
 import { AgentRunner } from '../agent/runner';
 import type { ActionStatus } from '../agent/types';
 import { PgAgentStore } from '../db/pg-agent.store';
 import { DecideApprovalDto, ListApprovalsQuery } from './dto';
+import { ReviewerGuard } from './reviewer.guard';
 
 const STATUS: Record<string, ActionStatus | undefined> = {
   pending: 'pending_approval', approved: 'approved', rejected: 'rejected', all: undefined,
 };
 
 @Controller('approvals')
+@UseGuards(ReviewerGuard)
 export class ApprovalsController {
   constructor(private readonly store: PgAgentStore, private readonly runner: AgentRunner) {}
 

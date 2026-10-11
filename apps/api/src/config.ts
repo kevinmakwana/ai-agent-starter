@@ -16,6 +16,8 @@ export interface AppConfig {
   port: number;
   databaseUrl: string;
   maxSteps: number;
+  /** When set, /approvals and /customers require `Authorization: Bearer <key>`. */
+  reviewerApiKey: string;
   provider: ProviderName;
   mockDelayMs: number;
   openai: { apiKey: string; model: string; baseUrl: string };
@@ -34,6 +36,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     port: Number(env.API_PORT || 3001),
     databaseUrl: env.DATABASE_URL || `postgres://${user}:${pass}@localhost:${env.DB_PORT || 5432}/${db}`,
     maxSteps: Number(env.AGENT_MAX_STEPS || 8),
+    reviewerApiKey: env.REVIEWER_API_KEY || '',
     provider,
     mockDelayMs: Number(env.MOCK_DELAY_MS ?? 150),
     openai: {

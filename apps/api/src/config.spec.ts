@@ -3,7 +3,7 @@ import { loadConfig } from './config';
 describe('loadConfig', () => {
   it('runs with zero configuration (offline mock provider)', () => {
     const cfg = loadConfig({});
-    expect(cfg).toMatchObject({ provider: 'mock', port: 3001, maxSteps: 8 });
+    expect(cfg).toMatchObject({ provider: "mock", port: 3001, maxSteps: 8, reviewerApiKey: "" });
     expect(cfg.databaseUrl).toBe('postgres://postgres:postgres@localhost:5432/aiagent');
   });
 

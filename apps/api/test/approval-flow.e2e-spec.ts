@@ -130,6 +130,27 @@ maybe('approval flow (e2e, real Postgres)', () => {
     });
   });
 
+  describe('with REVIEWER_API_KEY set', () => {
+    beforeEach(() => { process.env.REVIEWER_API_KEY = 's3cret'; return boot(); });
+    afterEach(() => { delete process.env.REVIEWER_API_KEY; });
+
+    it('requires the key for approvals and customers, but not for chatting', async () => {
+      await http().get('/approvals').expect(401);
+      await http().get('/customers').expect(401);
+      await http().get('/approvals').set('Authorization', 'Bearer wrong').expect(401);
+      await http().post('/approvals/00000000-0000-4000-8000-000000000000').send({ decision: 'approve' }).expect(401);
+
+      const id = await newConversation(1); // customer-facing routes stay open
+      await http().post(`/conversations/${id}/messages`).send({ content: 'refund order #1' }).expect(201);
+
+      const auth = { Authorization: 'Bearer s3cret' };
+      const pending = await http().get('/approvals?status=pending').set(auth).expect(200);
+      expect(pending.body).toHaveLength(1);
+      await http().get('/customers').set(auth).expect(200);
+      await http().post(`/approvals/${pending.body[0].id}`).set(auth).send({ decision: 'approve' }).expect(201);
+    });
+  });
+
   describe('when the upstream LLM fails', () => {
     beforeEach(() => boot({ name: 'down', complete: async () => { throw new UpstreamLlmError('openai', 'HTTP 503 overloaded'); } }));
 

@@ -1,4 +1,4 @@
-import { Body, ConflictException, Controller, Get, Inject, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import { Body, ConflictException, Controller, Get, Inject, Param, ParseUUIDPipe, Post, UseGuards } from '@nestjs/common';
 import { NotFoundError } from '../agent/errors';
 import { AgentRunner } from '../agent/runner';
 import type { Pool } from 'pg';
@@ -6,6 +6,7 @@ import { PgAgentStore } from '../db/pg-agent.store';
 import { PgShopRepo } from '../db/pg-shop.repo';
 import { PG_POOL } from '../tokens';
 import { CreateConversationDto, SendMessageDto } from './dto';
+import { ReviewerGuard } from './reviewer.guard';
 
 @Controller()
 export class ConversationsController {
@@ -18,6 +19,7 @@ export class ConversationsController {
 
   /** Not in the brief, but the UI needs it to pick who a conversation is bound to. */
   @Get('customers')
+  @UseGuards(ReviewerGuard)
   async customers() {
     const { rows } = await this.pool.query(`
       SELECT c.id, c.name, c.email, count(o.id)::int AS "orderCount", min(o.id) AS "firstOrderId"

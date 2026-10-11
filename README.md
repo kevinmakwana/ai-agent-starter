@@ -109,6 +109,7 @@ One root `.env` (see [.env.example](.env.example)); everything is optional.
 | `DATABASE_URL` | built from the above | Full connection string override |
 | `API_PORT` | `3001` | NestJS port |
 | `API_URL` | `http://localhost:3001` | Where Next.js proxies `/api/*` |
+| `REVIEWER_API_KEY` | _(unset)_ | If set, `/approvals` and `/customers` require `Authorization: Bearer <key>`; unset = open demo mode |
 | `AGENT_MAX_STEPS` | `8` | Max model calls per run |
 | `LLM_PROVIDER` | `mock` | `mock` \| `openai` \| `anthropic` |
 | `MOCK_DELAY_MS` | `150` | Artificial mock latency so the live trace is visible |
@@ -131,12 +132,16 @@ Regenerate the README screenshots with the stack running: `npm run screenshot` (
 
 ## Security notes
 
-This is a **starter, not a production service**: the API has **no authentication**. Anyone who can reach it can pick any `customerId`, read any trace, list customers and approve refunds. The guardrails bind *the agent* to a customer; they do not authenticate *callers*. Before exposing it anywhere real, derive the customer from a session, scope `/conversations/*` to its owner, and put `/approvals` and `/customers` behind a reviewer/operator role (ideally four-eyes: the approver is not the requester). Upstream LLM error bodies are logged server-side only and never returned to clients.
+This is a **starter, not a production service**. What is and isn't protected:
+
+- **Reviewer routes can be locked down.** Set `REVIEWER_API_KEY` and `GET/POST /approvals` and `GET /customers` require `Authorization: Bearer <key>` (constant-time compare, `401` otherwise). Left unset, the API logs a warning and stays open so the zero-config demo works. The Next.js server attaches the key to proxied requests, so it never reaches the browser.
+- **Customer routes are still unauthenticated.** `/conversations/*` takes `customerId` from the request body, so anyone who can reach the API can chat as any customer. The guardrails bind *the agent* to a customer; they don't authenticate *callers*. The bundled UI is also both the customer chat and the reviewer console, so the proxy key protects the API from direct callers, not from someone using the UI. Before exposing this for real, derive the customer from a session, scope conversations to their owner, and split the reviewer console (ideally four-eyes: approver ≠ requester).
+- Upstream LLM error bodies are logged server-side only and never returned to clients.
 
 ## Next steps
 
 - Stream runs to the UI over SSE instead of polling.
-- Authentication (customer sessions + reviewer role) and an audit log of who decided what; see Security notes.
+- Real authentication: customer sessions, per-reviewer identities and an audit log of who decided what (see Security notes).
 - Run steps as a background job (queue) so long agent runs don't hold an HTTP request open.
 - Prompt-injection and eval suites; replay recorded traces against new prompts or models.
 - Per-tool rate limits, cost budgets and token accounting per conversation.
