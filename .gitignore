@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.next/
+coverage/
+*.tsbuildinfo
+next-env.d.ts
+
+# secrets / local config
+.env
+.env.*
+!.env.example
+
+.DS_Store
+npm-debug.log*
+test-results/
+playwright-report/
