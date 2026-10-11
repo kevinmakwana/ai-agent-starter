@@ -1,6 +1,9 @@
+import { createHash, randomBytes } from 'node:crypto';
 import type { Pool } from 'pg';
 import type { Action, ActionStatus, AgentStore, Conversation, NewAction, NewStep, Run, Step } from '../agent/types';
 import { camel } from './pool';
+
+const hashToken = (token: string) => createHash('sha256').update(token).digest('hex');
 
 const TERMINAL = ['completed', 'failed', 'step_limit'];
 
@@ -24,9 +27,20 @@ export class PgAgentStore implements AgentStore {
     SELECT c.id, c.customer_id, c.title, c.created_at, cu.name AS customer_name, cu.email AS customer_email
     FROM conversations c JOIN customers cu ON cu.id = c.customer_id`;
 
-  async createConversation(customerId: number, title: string): Promise<Conversation> {
-    const { rows } = await this.pool.query('INSERT INTO conversations (customer_id, title) VALUES ($1, $2) RETURNING id', [customerId, title]);
-    return (await this.getConversation(rows[0].id))!;
+  /** The returned accessToken is the only credential for this conversation; only its hash is stored. */
+  async createConversation(customerId: number, title: string): Promise<Conversation & { accessToken: string }> {
+    const accessToken = randomBytes(24).toString('base64url');
+    const { rows } = await this.pool.query(
+      'INSERT INTO conversations (customer_id, title, access_token_hash) VALUES ($1, $2, $3) RETURNING id',
+      [customerId, title, hashToken(accessToken)],
+    );
+    return { ...(await this.getConversation(rows[0].id))!, accessToken };
+  }
+
+  async verifyConversationToken(id: string, token: string): Promise<boolean> {
+    const { rowCount } = await this.pool.query(
+      'SELECT 1 FROM conversations WHERE id = $1 AND access_token_hash = $2', [id, hashToken(token)]);
+    return (rowCount ?? 0) > 0;
   }
 
   async getConversation(id: string): Promise<Conversation | null> {

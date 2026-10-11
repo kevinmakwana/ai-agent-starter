@@ -14,6 +14,6 @@ export class HealthController {
     } catch {
       throw new ServiceUnavailableException({ status: 'error', db: 'down', provider: this.cfg.provider });
     }
-    return { status: 'ok', db: 'up', provider: this.cfg.provider };
+    return { status: 'ok', db: 'up', provider: this.cfg.provider, reviewerAuth: Boolean(this.cfg.reviewerApiKey) };
   }
 }

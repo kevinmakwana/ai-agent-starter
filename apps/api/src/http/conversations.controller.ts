@@ -5,6 +5,7 @@ import type { Pool } from 'pg';
 import { PgAgentStore } from '../db/pg-agent.store';
 import { PgShopRepo } from '../db/pg-shop.repo';
 import { PG_POOL } from '../tokens';
+import { ConversationAccessGuard } from './conversation-access.guard';
 import { CreateConversationDto, SendMessageDto } from './dto';
 import { ReviewerGuard } from './reviewer.guard';
 
@@ -27,20 +28,26 @@ export class ConversationsController {
     return rows;
   }
 
+  /** Returns the conversation plus its one-time `accessToken`. Who may *start* one is still unauthenticated (see README). */
   @Post('conversations')
   async create(@Body() dto: CreateConversationDto) {
-    const customer = await this.shop.getCustomer(dto.customerId);
-    if (!customer) throw new NotFoundError(`Customer ${dto.customerId} not found`);
+    const customer = dto.customerId
+      ? await this.shop.getCustomer(dto.customerId)
+      : await this.pool.query('SELECT id, name, email FROM customers WHERE lower(email) = lower($1)', [dto.email]).then((r) => r.rows[0]);
+    if (!customer) throw new NotFoundError(`Customer ${dto.customerId ?? dto.email} not found`);
     return this.store.createConversation(customer.id, dto.title ?? `Chat with ${customer.name}`);
   }
 
+  /** Reviewer-only: customers only ever see conversations they hold a token for. */
   @Get('conversations')
+  @UseGuards(ReviewerGuard)
   list() {
     return this.store.listConversations();
   }
 
   /** Full trace: every run with every step, plus the approvals raised along the way. */
   @Get('conversations/:id')
+  @UseGuards(ConversationAccessGuard)
   async trace(@Param('id', ParseUUIDPipe) id: string) {
     const conversation = await this.requireConversation(id);
     const [runs, steps, approvals] = await Promise.all([
@@ -56,6 +63,7 @@ export class ConversationsController {
   }
 
   @Post('conversations/:id/messages')
+  @UseGuards(ConversationAccessGuard)
   async send(@Param('id', ParseUUIDPipe) id: string, @Body() dto: SendMessageDto) {
     const conv = await this.requireConversation(id);
     if (await this.store.hasPendingApproval(id)) {

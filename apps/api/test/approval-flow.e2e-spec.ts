@@ -38,7 +38,7 @@ maybe('approval flow (e2e, real Postgres)', () => {
     beforeEach(() => boot());
 
     it('reports health', async () => {
-      await http().get('/health').expect(200).expect({ status: 'ok', db: 'up', provider: 'mock' });
+      await http().get('/health').expect(200).expect({ status: 'ok', db: 'up', provider: 'mock', reviewerAuth: false });
     });
 
     it('lookup -> refund request -> pending approval -> approve -> refund recorded', async () => {
@@ -115,6 +115,14 @@ maybe('approval flow (e2e, real Postgres)', () => {
       expect(rows[0].total).toBe(15);
     });
 
+    it('starts a conversation by customer email (case-insensitive)', async () => {
+      const res = await http().post('/conversations').send({ email: 'AVA.BROOKS@example.com' }).expect(201);
+      expect(res.body).toMatchObject({ customerId: 1, accessToken: expect.any(String) });
+      await http().post('/conversations').send({ email: 'nobody@example.com' }).expect(404);
+      await http().post('/conversations').send({}).expect(400);
+      await http().post('/conversations').send({ email: 'not-an-email' }).expect(400);
+    });
+
     it('validates input (whitelist + forbidNonWhitelisted)', async () => {
       await http().post('/conversations').send({ customerId: 1, admin: true }).expect(400);
       await http().post('/conversations').send({ customerId: 'one' }).expect(400);
@@ -131,23 +139,54 @@ maybe('approval flow (e2e, real Postgres)', () => {
   });
 
   describe('with REVIEWER_API_KEY set', () => {
+    const reviewer = { Authorization: 'Bearer s3cret' };
     beforeEach(() => { process.env.REVIEWER_API_KEY = 's3cret'; return boot(); });
     afterEach(() => { delete process.env.REVIEWER_API_KEY; });
 
-    it('requires the key for approvals and customers, but not for chatting', async () => {
-      await http().get('/approvals').expect(401);
-      await http().get('/customers').expect(401);
-      await http().get('/approvals').set('Authorization', 'Bearer wrong').expect(401);
+    const start = async (customerId: number) => {
+      const res = await http().post('/conversations').send({ customerId }).expect(201);
+      return { id: res.body.id as string, token: { 'X-Conversation-Token': res.body.accessToken as string } };
+    };
+
+    it('locks reviewer routes behind the key', async () => {
+      await http().get('/health').expect(200).expect((r) => expect(r.body.reviewerAuth).toBe(true));
+      for (const path of ['/approvals', '/customers', '/conversations']) {
+        await http().get(path).expect(401);
+        await http().get(path).set('Authorization', 'Bearer wrong').expect(401);
+        await http().get(path).set(reviewer).expect(200);
+      }
       await http().post('/approvals/00000000-0000-4000-8000-000000000000').send({ decision: 'approve' }).expect(401);
+    });
 
-      const id = await newConversation(1); // customer-facing routes stay open
-      await http().post(`/conversations/${id}/messages`).send({ content: 'refund order #1' }).expect(201);
+    it('only the token holder (or a reviewer) can read or write a conversation', async () => {
+      const mine = await start(1);
+      const other = await start(2);
 
-      const auth = { Authorization: 'Bearer s3cret' };
-      const pending = await http().get('/approvals?status=pending').set(auth).expect(200);
-      expect(pending.body).toHaveLength(1);
-      await http().get('/customers').set(auth).expect(200);
-      await http().post(`/approvals/${pending.body[0].id}`).set(auth).send({ decision: 'approve' }).expect(201);
+      await http().get(`/conversations/${mine.id}`).expect(401);
+      await http().get(`/conversations/${mine.id}`).set(other.token).expect(401); // someone else's token
+      await http().post(`/conversations/${mine.id}/messages`).set(other.token).send({ content: 'hi' }).expect(401);
+      await http().get('/conversations/00000000-0000-4000-8000-000000000000').set(mine.token).expect(401); // no id probing
+
+      await http().get(`/conversations/${mine.id}`).set(mine.token).expect(200);
+      await http().post(`/conversations/${mine.id}/messages`).set(mine.token).send({ content: 'refund order #1' }).expect(201);
+      await http().get(`/conversations/${mine.id}`).set(reviewer).expect(200); // reviewers can read any trace
+    });
+
+    it('only stores a hash of the token and never returns it again', async () => {
+      const mine = await start(1);
+      const { rows } = await pool.query('SELECT access_token_hash FROM conversations WHERE id = $1', [mine.id]);
+      expect(rows[0].access_token_hash).toMatch(/^[0-9a-f]{64}$/);
+      expect(rows[0].access_token_hash).not.toBe(mine.token['X-Conversation-Token']);
+      const trace = await http().get(`/conversations/${mine.id}`).set(mine.token).expect(200);
+      expect(JSON.stringify(trace.body)).not.toContain(mine.token['X-Conversation-Token']);
+    });
+
+    it('lets a reviewer approve while the customer cannot', async () => {
+      const mine = await start(1);
+      await http().post(`/conversations/${mine.id}/messages`).set(mine.token).send({ content: 'refund order #1' }).expect(201);
+      const [approval] = (await http().get('/approvals?status=pending').set(reviewer)).body;
+      await http().post(`/approvals/${approval.id}`).set(mine.token).send({ decision: 'approve' }).expect(401); // token != reviewer
+      await http().post(`/approvals/${approval.id}`).set(reviewer).send({ decision: 'approve' }).expect(201);
     });
   });
 

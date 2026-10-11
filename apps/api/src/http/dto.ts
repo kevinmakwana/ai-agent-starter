@@ -1,8 +1,14 @@
-import { IsIn, IsInt, IsOptional, IsString, Length, MaxLength, Min } from 'class-validator';
+import { IsEmail, IsIn, IsInt, IsOptional, IsString, Length, MaxLength, Min, ValidateIf } from 'class-validator';
 
 export class CreateConversationDto {
+  /** Either customerId or email identifies who the conversation is bound to. */
+  @ValidateIf((o: CreateConversationDto) => o.customerId !== undefined || o.email === undefined)
   @IsInt() @Min(1)
-  customerId!: number;
+  customerId?: number;
+
+  @ValidateIf((o: CreateConversationDto) => o.email !== undefined)
+  @IsEmail()
+  email?: string;
 
   @IsOptional() @IsString() @MaxLength(120)
   title?: string;

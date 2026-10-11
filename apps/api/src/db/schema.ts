@@ -33,6 +33,8 @@ CREATE TABLE IF NOT EXISTS conversations (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS access_token_hash text;
+
 CREATE TABLE IF NOT EXISTS runs (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   conversation_id uuid NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,

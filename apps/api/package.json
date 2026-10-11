@@ -8,6 +8,7 @@
     "build": "nest build",
     "start": "node dist/main",
     "seed": "tsx src/db/seed.ts",
+    "smoke:llm": "tsx src/providers/smoke.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "jest",
     "test:e2e": "jest --testPathPatterns e2e"
