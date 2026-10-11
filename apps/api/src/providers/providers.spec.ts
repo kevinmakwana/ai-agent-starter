@@ -34,7 +34,11 @@ describe('OpenAiProvider', () => {
 
   it('turns HTTP and network failures into UpstreamLlmError', async () => {
     const http = new OpenAiProvider({ apiKey: 'k', model: 'm', baseUrl: 'https://x.test', fetch: async () => json({ error: 'rate limited' }, 429) });
-    await expect(http.complete(history, tools)).rejects.toThrow(/openai.*HTTP 429/);
+    const err = await http.complete(history, tools).catch((e) => e);
+    expect(err).toBeInstanceOf(UpstreamLlmError);
+    expect(err.message).toMatch(/openai.*HTTP 429/);
+    expect(err.message).not.toContain('rate limited'); // upstream body stays server-side
+    expect(err.detail).toContain('rate limited');
     const net = new OpenAiProvider({ apiKey: 'k', model: 'm', baseUrl: 'https://x.test', fetch: async () => { throw new Error('ECONNREFUSED'); } });
     await expect(net.complete(history, tools)).rejects.toBeInstanceOf(UpstreamLlmError);
   });

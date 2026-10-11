@@ -129,10 +129,14 @@ E2E_DATABASE_URL=postgres://postgres:postgres@localhost:5432/aiagent npm test   
 
 Regenerate the README screenshots with the stack running: `npm run screenshot` (needs `npx playwright install chromium` once).
 
+## Security notes
+
+This is a **starter, not a production service**: the API has **no authentication**. Anyone who can reach it can pick any `customerId`, read any trace, list customers and approve refunds. The guardrails bind *the agent* to a customer; they do not authenticate *callers*. Before exposing it anywhere real, derive the customer from a session, scope `/conversations/*` to its owner, and put `/approvals` and `/customers` behind a reviewer/operator role (ideally four-eyes: the approver is not the requester). Upstream LLM error bodies are logged server-side only and never returned to clients.
+
 ## Next steps
 
 - Stream runs to the UI over SSE instead of polling.
-- Authentication and reviewer identity on approvals; an audit log of who decided what.
+- Authentication (customer sessions + reviewer role) and an audit log of who decided what; see Security notes.
 - Run steps as a background job (queue) so long agent runs don't hold an HTTP request open.
 - Prompt-injection and eval suites; replay recorded traces against new prompts or models.
 - Per-tool rate limits, cost budgets and token accounting per conversation.

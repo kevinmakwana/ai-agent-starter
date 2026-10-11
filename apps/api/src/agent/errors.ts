@@ -4,9 +4,11 @@ export class ConflictError extends Error {}
 
 /** The upstream LLM failed or was unreachable -> 502 Bad Gateway. */
 export class UpstreamLlmError extends Error {
+  /** `message` is client-safe; `detail` (raw upstream body, etc.) is for server logs only. */
   constructor(
     public readonly provider: string,
     message: string,
+    public readonly detail?: string,
   ) {
     super(`Upstream LLM error (${provider}): ${message}`);
   }

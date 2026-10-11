@@ -31,9 +31,9 @@ export class AnthropicProvider implements ChatProvider {
         signal: AbortSignal.timeout(60_000),
       });
     } catch (e) {
-      throw new UpstreamLlmError(this.name, `request failed: ${e instanceof Error ? e.message : e}`);
+      throw new UpstreamLlmError(this.name, 'could not reach the provider', e instanceof Error ? e.message : String(e));
     }
-    if (!res.ok) throw new UpstreamLlmError(this.name, `HTTP ${res.status} ${(await res.text()).slice(0, 300)}`);
+    if (!res.ok) throw new UpstreamLlmError(this.name, `provider returned HTTP ${res.status}`, (await res.text()).slice(0, 500));
 
     const data: any = await res.json();
     if (!Array.isArray(data?.content)) throw new UpstreamLlmError(this.name, 'response contained no content');
