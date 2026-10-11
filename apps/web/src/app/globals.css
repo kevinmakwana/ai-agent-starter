@@ -131,3 +131,12 @@ blockquote em { display: block; color: var(--muted); margin-top: 4px; }
   .app { height: auto; grid-template-columns: 1fr; grid-template-areas: 'top' 'list' 'chat' 'side'; }
   .chat, .side { min-height: 480px; }
 }
+
+.top-right { display: flex; align-items: center; gap: 14px; }
+.app.customer { grid-template-columns: 250px minmax(0, 1fr); grid-template-areas: 'top top' 'list chat'; }
+.app.login { grid-template-columns: 1fr; grid-template-areas: 'top' 'card'; }
+.login-card { grid-area: card; margin: 8vh auto 0; width: min(380px, 100%); height: fit-content; padding: 24px; gap: 12px; }
+.login-card h1 { font-size: 18px; }
+.login-card input { padding: 9px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); }
+.new-chat input { flex: 1; min-width: 0; padding: 6px 8px; border-radius: 9px; border: 1px solid var(--line); background: var(--panel); }
+@media (max-width: 1100px) { .app.customer { grid-template-areas: 'top' 'list' 'chat'; grid-template-columns: 1fr; } }

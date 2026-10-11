@@ -1,13 +1,15 @@
-// Server-side proxy to the NestJS API. The reviewer key stays on the server and is attached here,
-// so it never reaches the browser bundle. (This demo UI doubles as the reviewer console.)
+// Thin pass-through proxy to the NestJS API. It holds no secrets: the browser supplies its own
+// credential (a conversation token for customers, the reviewer key for the console).
 const apiUrl = () => process.env.API_URL ?? `http://localhost:${process.env.API_PORT ?? 3001}`;
+const FORWARDED = ['content-type', 'authorization', 'x-conversation-token'];
 
 async function proxy(req: Request, { params }: { params: Promise<{ path: string[] }> }) {
   const { path } = await params;
   const headers = new Headers();
-  const type = req.headers.get('content-type');
-  if (type) headers.set('content-type', type);
-  if (process.env.REVIEWER_API_KEY) headers.set('authorization', `Bearer ${process.env.REVIEWER_API_KEY}`);
+  for (const name of FORWARDED) {
+    const value = req.headers.get(name);
+    if (value) headers.set(name, value);
+  }
 
   try {
     const upstream = await fetch(`${apiUrl()}/${path.join('/')}${new URL(req.url).search}`, {
