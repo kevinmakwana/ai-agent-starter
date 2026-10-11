@@ -14,7 +14,9 @@ interface Props {
 export function Chat({ detail, customer, sending, optimistic, error, onSend, onReview }: Props) {
   const [text, setText] = useState('');
   const endRef = useRef<HTMLDivElement>(null);
-  useEffect(() => endRef.current?.scrollIntoView({ block: 'end' }), [detail, optimistic, sending]);
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ block: 'end' });
+  }, [detail, optimistic, sending]);
 
   if (!detail) {
     return (

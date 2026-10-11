@@ -9,6 +9,7 @@ if (existsSync(rootEnv)) process.loadEnvFile(rootEnv);
 const apiUrl = process.env.API_URL ?? `http://localhost:${process.env.API_PORT ?? 3001}`;
 
 const nextConfig: NextConfig = {
+  devIndicators: false,
   // The browser only talks to /api/*; Next proxies it to the NestJS API (no CORS needed).
   async rewrites() {
     return [{ source: '/api/:path*', destination: `${apiUrl}/:path*` }];
