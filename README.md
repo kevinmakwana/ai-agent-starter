@@ -98,7 +98,7 @@ It asks "Where is my order #1?" and expects a valid `get_order` tool call back.
 | `POST /conversations` | Create a conversation bound to `{ customerId }` or `{ email }`; returns the conversation plus its one-time `accessToken` |
 | `GET /conversations` | 🔒 reviewer: list all conversations (with pending-approval counts) |
 | `GET /conversations/:id` | 🔑 Full trace: runs → steps, plus approvals |
-| `POST /conversations/:id/messages` | 🔑 Send `{ content }`; runs the agent until it answers or pauses (`409` while an approval is pending) |
+| `POST /conversations/:id/messages` | 🔑 Send `{ content }`; runs the agent until it answers or pauses (`409` while another run is in progress or an approval is pending) |
 | `GET /approvals?status=pending` | 🔒  List approvals (`pending` \| `approved` \| `rejected` \| `all`) with customer, order and reasoning context |
 | `POST /approvals/:id` | 🔒 `{ decision: "approve" \| "reject", note? }`; executes the parked call and resumes the run (`409` if already decided) |
 | `GET /customers` | 🔒 Customers for the demo picker (extra) |
@@ -106,7 +106,7 @@ It asks "Where is my order #1?" and expects a valid `get_order` tool call back.
 
 🔒 = reviewer key (`Authorization: Bearer <REVIEWER_API_KEY>`). 🔑 = the conversation's `X-Conversation-Token`, or the reviewer key. Both are open when `REVIEWER_API_KEY` is unset (demo mode).
 
-Validation uses `class-validator` with `whitelist` + `forbidNonWhitelisted` (unknown fields → `400`). Upstream LLM failures return `502` with a clear message and mark the run `failed`.
+Validation uses `class-validator` with `whitelist` + `forbidNonWhitelisted` (unknown fields → `400`). Upstream LLM failures return `502` with a clear message and mark the run `failed`. A failed run's stored error is shown verbatim only to reviewers; customers get a generic message.
 
 ## Configuration
 

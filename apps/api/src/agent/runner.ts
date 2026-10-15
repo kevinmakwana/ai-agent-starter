@@ -60,7 +60,10 @@ export class AgentRunner {
       try {
         result = await toolByName(action.toolName)!.execute(this.ctx(conv), { ...action.toolArgs, actionId: action.id });
       } catch (e) {
-        if (!(e instanceof GuardrailViolation)) throw e;
+        if (!(e instanceof GuardrailViolation)) {
+          await store.reopenAction(action.id); // infrastructure failure: let the reviewer try again
+          throw e;
+        }
         result = guardrailResult(e); // e.g. another refund landed while this one waited
       }
     } else {

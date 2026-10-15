@@ -43,6 +43,15 @@ export class PgShopRepo implements ShopRepo {
       const o = await client.query('SELECT customer_id, status, total FROM orders WHERE id = $1 FOR UPDATE', [input.orderId]);
       if (!o.rows[0]) throw new GuardrailViolation('NOT_FOUND', `Order #${input.orderId} was not found.`);
       assertSameCustomer(input.customerId, o.rows[0].customer_id, `Order #${input.orderId}`);
+      if (input.actionId) {
+        // Replay of an approval whose refund already committed (e.g. the reply was lost): return it, never pay twice.
+        const done = await client.query('SELECT id FROM refunds WHERE action_id = $1', [input.actionId]);
+        if (done.rows[0]) {
+          const total = await client.query('SELECT COALESCE(SUM(amount), 0) AS total FROM refunds WHERE order_id = $1', [input.orderId]);
+          await client.query('COMMIT');
+          return { refundId: done.rows[0].id as number, refundedTotal: total.rows[0].total as number };
+        }
+      }
       const prior = await client.query('SELECT COALESCE(SUM(amount), 0) AS total FROM refunds WHERE order_id = $1', [input.orderId]);
       assertRefundable({ amount: input.amount, orderTotal: o.rows[0].total, priorRefunded: prior.rows[0].total, status: o.rows[0].status });
       const ins = await client.query(

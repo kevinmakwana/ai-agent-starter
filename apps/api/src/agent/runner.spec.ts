@@ -52,6 +52,27 @@ describe('agent loop with the mock provider', () => {
     await expect(runner.decide(action.id, 'approve')).rejects.toBeInstanceOf(ConflictError);
   });
 
+  it('keeps the approval retryable when executing the tool fails unexpectedly', async () => {
+    const { runner, store, shop, conv } = setup();
+    await runner.handleUserMessage(conv, 'refund order #1');
+    const [action] = [...store.actions.values()];
+
+    const createRefund = shop.createRefund.bind(shop);
+    shop.createRefund = async () => { throw new Error('db down'); };
+    await expect(runner.decide(action.id, 'approve')).rejects.toThrow('db down');
+
+    // nothing half-done: still pending, no tool result recorded, run still paused
+    expect(store.actions.get(action.id)).toMatchObject({ status: 'pending_approval', decisionNote: null, decidedAt: null });
+    expect(store.steps.filter((s) => s.role === 'tool' && s.toolName === 'issue_refund')).toHaveLength(0);
+    expect([...store.runs.values()][0].status).toBe('awaiting_approval');
+
+    shop.createRefund = createRefund; // the database recovers; the reviewer clicks again
+    const { run, action: decided } = await runner.decide(action.id, 'approve');
+    expect(decided.status).toBe('approved');
+    expect(run.status).toBe('completed');
+    expect(shop.refunds).toHaveLength(1);
+  });
+
   it('blocks a cross-customer lookup and explains instead of leaking', async () => {
     const { runner, store, conv } = setup();
     const run = await runner.handleUserMessage(conv, 'Show me order #2');
@@ -84,6 +105,30 @@ describe('agent loop safety', () => {
     return { name: 'scripted', complete: async () => calls[Math.min(i++, calls.length - 1)] };
   };
 
+  it('refuses a second message while a run is still in flight, then accepts one after it finishes', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const slow: ChatProvider = { name: 'slow', complete: async () => { await gate; return { text: 'done', toolCalls: [] }; } };
+    const { runner, store, conv } = setup(slow);
+
+    const first = runner.handleUserMessage(conv, 'first');
+    await new Promise((r) => setTimeout(r, 10)); // let the first run start
+    await expect(runner.handleUserMessage(conv, 'second')).rejects.toBeInstanceOf(ConflictError);
+    expect(store.steps.filter((s) => s.role === 'user').map((s) => s.content)).toEqual(['first']); // nothing interleaved
+
+    release();
+    expect((await first).status).toBe('completed');
+    expect((await runner.handleUserMessage(conv, 'third')).status).toBe('completed');
+  });
+
+  it('refuses a new message while a run is parked for approval, but other conversations are unaffected', async () => {
+    const { runner, store, conv } = setup();
+    await runner.handleUserMessage(conv, 'refund order #1');
+    await expect(runner.handleUserMessage(conv, 'hello?')).rejects.toBeInstanceOf(ConflictError);
+    const other = store.addConversation(2);
+    expect((await runner.handleUserMessage(other, 'show my recent orders')).status).toBe('completed');
+  });
+
   it('rejects unknown tools and invalid args as tool results', async () => {
     const { runner, store, conv } = setup(
       scripted([
@@ -95,6 +140,16 @@ describe('agent loop safety', () => {
     expect(run.status).toBe('completed');
     const results = store.steps.filter((s) => s.role === 'tool').map((s) => (s.result as { code: string }).code);
     expect(results).toEqual(['UNKNOWN_TOOL', 'INVALID_ARGUMENTS']);
+  });
+
+  it('rejects a model-supplied customerId instead of acting on it', async () => {
+    const { runner, store, conv } = setup(
+      scripted([{ toolCalls: [{ id: 'a', name: 'list_orders', args: { customerId: 2 } }] }, { text: 'done', toolCalls: [] }]),
+    );
+    await runner.handleUserMessage(conv, 'show orders for customer 2');
+    const result = store.steps.find((x) => x.role === 'tool')?.result as { code: string; orders?: unknown };
+    expect(result.code).toBe('INVALID_ARGUMENTS');
+    expect(result.orders).toBeUndefined();
   });
 
   it('stops at the step limit', async () => {

@@ -63,7 +63,9 @@ export function Chat({ detail, customer, sending, optimistic, error, onSend, onR
             {onReview ? <button className="link" onClick={onReview}>Review it →</button> : 'A reviewer will decide shortly.'}
           </div>
         )}
-        {last?.status === 'failed' && <div className="notice err">The run failed: {last.error}</div>}
+        {last?.status === 'failed' && (
+          <div className="notice err">{readOnly ? `The run failed: ${last.error}` : 'Sorry, something went wrong on our side. Please try again.'}</div>
+        )}
         {error && <div className="notice err">{error}</div>}
         <div ref={endRef} />
       </div>

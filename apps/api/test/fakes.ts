@@ -1,4 +1,4 @@
-import { GuardrailViolation } from '../src/agent/errors';
+import { ConflictError, GuardrailViolation } from '../src/agent/errors';
 import { assertRefundable, assertSameCustomer } from '../src/agent/guardrails';
 import type {
   Action, AgentStore, Conversation, Customer, NewAction, NewStep, Order, Run, ShopRepo, Step, Ticket,
@@ -60,6 +60,10 @@ export class MemoryStore implements AgentStore {
   }
   async getConversation(id: string) { return this.conversations.get(id) ?? null; }
   async createRun(conversationId: string) {
+    const busy = [...this.runs.values()].some(
+      (r) => r.conversationId === conversationId && (r.status === 'running' || r.status === 'awaiting_approval'),
+    );
+    if (busy) throw new ConflictError('This conversation already has a run in progress or waiting for approval.');
     const run: Run = { id: `run-${++this.n}`, conversationId, status: 'running', modelCalls: 0, error: null, createdAt: '', finishedAt: null };
     this.runs.set(run.id, run);
     return { ...run };
@@ -91,6 +95,12 @@ export class MemoryStore implements AgentStore {
     if (!a || a.status !== 'pending_approval') return null;
     Object.assign(a, { status, decisionNote: note ?? null, decidedAt: 'now' });
     return { ...a };
+  }
+  async reopenAction(id: string) {
+    const a = this.actions.get(id);
+    if (a && a.status !== 'pending_approval' && a.result === null) {
+      Object.assign(a, { status: 'pending_approval', decisionNote: null, decidedAt: null });
+    }
   }
   async setActionResult(id: string, result: unknown) { this.actions.get(id)!.result = result; }
 }

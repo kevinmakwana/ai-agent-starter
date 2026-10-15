@@ -88,6 +88,8 @@ CREATE TABLE IF NOT EXISTS refunds (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS refunds_order_idx ON refunds (order_id);
+-- At most one refund per approved action, whatever the application code does.
+CREATE UNIQUE INDEX IF NOT EXISTS refunds_action_uniq ON refunds (action_id) WHERE action_id IS NOT NULL;
 `;
 
 export const RESET_SQL =
