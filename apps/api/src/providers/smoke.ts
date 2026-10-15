@@ -14,7 +14,7 @@ async function main() {
   const provider = createProvider(cfg);
   const out = await provider.complete(
     [
-      { role: 'system', content: 'You are a support agent for Acme Shop. customerId: 1. Use tools to answer.' },
+      { role: 'system', content: 'You are a support agent for Acme Shop. Use tools to answer.' },
       { role: 'user', content: 'Where is my order #1?' },
     ],
     toolSpecs(),

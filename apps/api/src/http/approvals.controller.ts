@@ -16,7 +16,7 @@ export class ApprovalsController {
 
   @Get()
   list(@Query() q: ListApprovalsQuery) {
-    return this.store.listApprovals(STATUS[q.status ?? 'all']);
+    return this.store.listApprovals({ status: STATUS[q.status ?? 'all'] });
   }
 
   /** Approve executes the parked tool call and resumes the run; reject tells the agent it was declined. */

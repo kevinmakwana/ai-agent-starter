@@ -3,7 +3,9 @@ import { Test } from '@nestjs/testing';
 import type { Pool } from 'pg';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
-import { UpstreamLlmError } from '../src/agent/errors';
+import { ConflictError, UpstreamLlmError } from '../src/agent/errors';
+import { PgAgentStore } from '../src/db/pg-agent.store';
+import { PgShopRepo } from '../src/db/pg-shop.repo';
 import { seedDatabase } from '../src/db/seed-data';
 import { configureApp } from '../src/http/setup';
 import { CHAT_PROVIDER, PG_POOL } from '../src/tokens';
@@ -115,6 +117,98 @@ maybe('approval flow (e2e, real Postgres)', () => {
       expect(rows[0].total).toBe(15);
     });
 
+    it('reopens a claimed approval only while it has no result', async () => {
+      const store = app.get(PgAgentStore);
+      const id = await newConversation(1);
+      await http().post(`/conversations/${id}/messages`).send({ content: 'refund order #1' }).expect(201);
+      const [approval] = (await http().get('/approvals?status=pending')).body;
+
+      await store.decideAction(approval.id, 'approved', 'ok');
+      await store.reopenAction(approval.id); // execution failed before a result existed
+      expect((await http().get('/approvals?status=pending')).body).toHaveLength(1);
+      expect((await store.getAction(approval.id))!).toMatchObject({ status: 'pending_approval', decisionNote: null, decidedAt: null });
+
+      await store.decideAction(approval.id, 'approved');
+      await store.setActionResult(approval.id, { status: 'refunded' });
+      await store.reopenAction(approval.id); // too late: the refund already happened
+      expect((await store.getAction(approval.id))!.status).toBe('approved');
+    });
+
+    it('blocks a new message while a fresh run is in flight but reclaims an abandoned one', async () => {
+      const id = await newConversation(1);
+      await pool.query("INSERT INTO runs (conversation_id, status) VALUES ($1, 'running')", [id]);
+      await http().post(`/conversations/${id}/messages`).send({ content: 'hi' }).expect(409);
+
+      // a crash left a run 'running' an hour ago with no recent steps: the conversation must not stay wedged
+      await pool.query("UPDATE runs SET created_at = now() - interval '1 hour' WHERE conversation_id = $1", [id]);
+      await http().post(`/conversations/${id}/messages`).send({ content: 'hi' }).expect(201);
+      const { rows } = await pool.query('SELECT status, error FROM runs WHERE conversation_id = $1 ORDER BY created_at', [id]);
+      expect(rows.map((r) => r.status)).toEqual(['failed', 'completed']);
+      expect(rows[0].error).toContain('Abandoned');
+    });
+
+    it('admits exactly one run when several are created in the same instant', async () => {
+      const store = app.get(PgAgentStore);
+      const id = await newConversation(1);
+      // open 8 connections up front, otherwise connection handshakes stagger the attempts and hide the race
+      await Promise.all(Array.from({ length: 8 }, () => pool.query('SELECT pg_sleep(0.05)')));
+      const attempts = await Promise.allSettled(Array.from({ length: 8 }, () => store.createRun(id)));
+      expect(attempts.filter((a) => a.status === 'fulfilled')).toHaveLength(1);
+      for (const a of attempts.filter((x) => x.status === 'rejected')) {
+        expect((a as PromiseRejectedResult).reason).toBeInstanceOf(ConflictError);
+      }
+      const { rows } = await pool.query('SELECT count(*)::int AS n FROM runs WHERE conversation_id = $1', [id]);
+      expect(rows[0].n).toBe(1);
+    });
+
+    describe('refund idempotency per approval', () => {
+      const actionId = '11111111-1111-4111-8111-111111111111';
+      const input = { customerId: 1, orderId: 1, amount: 5, reason: 'damaged item', actionId };
+
+      it('the database refuses a second refund for the same approval', async () => {
+        await pool.query('INSERT INTO refunds (order_id, amount, reason, action_id) VALUES (1, 5, $1, $2)', ['a', actionId]);
+        await expect(
+          pool.query('INSERT INTO refunds (order_id, amount, reason, action_id) VALUES (1, 5, $1, $2)', ['b', actionId]),
+        ).rejects.toThrow(/unique/i);
+        // refunds without an approval (e.g. manual adjustments) are not constrained
+        await pool.query("INSERT INTO refunds (order_id, amount, reason) VALUES (1, 1, 'manual one')");
+        await pool.query("INSERT INTO refunds (order_id, amount, reason) VALUES (1, 1, 'manual two')");
+      });
+
+      it('replaying createRefund for the same approval returns the original refund instead of paying twice', async () => {
+        const shop = app.get(PgShopRepo);
+        const first = await shop.createRefund(input);
+        const replay = await shop.createRefund(input);
+        expect(replay).toEqual(first);
+        const { rows } = await pool.query('SELECT count(*)::int AS n FROM refunds WHERE order_id = 1');
+        expect(rows[0].n).toBe(1);
+      });
+
+      it('replaying still succeeds when the refund used up the whole balance', async () => {
+        const shop = app.get(PgShopRepo);
+        const full = { ...input, amount: 18.75 }; // order 1 total
+        const first = await shop.createRefund(full);
+        expect(await shop.createRefund(full)).toEqual(first); // would be OVER_REFUND if it re-ran the balance check
+      });
+    });
+
+    it("a conversation's trace keeps its approvals however many newer ones exist elsewhere", async () => {
+      const mine = await newConversation(1);
+      await http().post(`/conversations/${mine}/messages`).send({ content: 'refund order #1' }).expect(201);
+
+      const other = await newConversation(2);
+      const run = await pool.query("INSERT INTO runs (conversation_id, status) VALUES ($1, 'completed') RETURNING id", [other]);
+      await pool.query(
+        `INSERT INTO actions (run_id, conversation_id, tool_name, tool_args, tool_call_id, status)
+         SELECT $1, $2, 'issue_refund', '{"orderId":2,"amount":1}', 'c' || g, 'rejected' FROM generate_series(1, 205) g`,
+        [run.rows[0].id, other],
+      );
+
+      const trace = await http().get(`/conversations/${mine}`).expect(200);
+      expect(trace.body.approvals).toHaveLength(1);
+      expect(trace.body.approvals[0]).toMatchObject({ conversationId: mine, status: 'pending_approval', toolArgs: { orderId: 1 } });
+    });
+
     it('starts a conversation by customer email (case-insensitive)', async () => {
       const res = await http().post('/conversations').send({ email: 'AVA.BROOKS@example.com' }).expect(201);
       expect(res.body).toMatchObject({ customerId: 1, accessToken: expect.any(String) });
@@ -187,6 +281,47 @@ maybe('approval flow (e2e, real Postgres)', () => {
       const [approval] = (await http().get('/approvals?status=pending').set(reviewer)).body;
       await http().post(`/approvals/${approval.id}`).set(mine.token).send({ decision: 'approve' }).expect(401); // token != reviewer
       await http().post(`/approvals/${approval.id}`).set(reviewer).send({ decision: 'approve' }).expect(201);
+    });
+  });
+
+  describe('with a slow provider', () => {
+    beforeEach(() => boot({
+      name: 'slow',
+      complete: async () => { await new Promise((r) => setTimeout(r, 200)); return { text: 'hi', toolCalls: [] }; },
+    }));
+
+    it('lets only one of two simultaneous messages run, without interleaving steps', async () => {
+      const id = await newConversation(1);
+      const send = (content: string) => http().post(`/conversations/${id}/messages`).send({ content });
+      const results = await Promise.all([send('a'), send('b')]);
+      expect(results.map((r) => r.status).sort()).toEqual([201, 409]);
+      const trace = await http().get(`/conversations/${id}`).expect(200);
+      expect(trace.body.runs).toHaveLength(1);
+      expect(trace.body.runs[0].steps.map((s: any) => s.role)).toEqual(['user', 'assistant']);
+    });
+  });
+
+  describe('when a run fails with an internal error and reviewer auth is on', () => {
+    const reviewer = { Authorization: 'Bearer s3cret' };
+    const internal = 'connect ECONNREFUSED 10.0.0.5:5432 (db-primary.internal)';
+    beforeEach(() => {
+      process.env.REVIEWER_API_KEY = 's3cret';
+      return boot({ name: 'broken', complete: async () => { throw new Error(internal); } });
+    });
+    afterEach(() => { delete process.env.REVIEWER_API_KEY; });
+
+    it('shows customers a generic error and reviewers the real one', async () => {
+      const res = await http().post('/conversations').send({ customerId: 1 }).expect(201);
+      const id = res.body.id as string;
+      const token = { 'X-Conversation-Token': res.body.accessToken as string };
+      await http().post(`/conversations/${id}/messages`).set(token).send({ content: 'hi' }).expect(500);
+
+      const asCustomer = await http().get(`/conversations/${id}`).set(token).expect(200);
+      expect(asCustomer.body.runs[0]).toMatchObject({ status: 'failed', error: 'Something went wrong on our side. Please try again.' });
+      expect(JSON.stringify(asCustomer.body)).not.toContain('ECONNREFUSED');
+
+      const asReviewer = await http().get(`/conversations/${id}`).set(reviewer).expect(200);
+      expect(asReviewer.body.runs[0]).toMatchObject({ status: 'failed', error: internal });
     });
   });
 

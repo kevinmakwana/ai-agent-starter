@@ -30,7 +30,6 @@ export class MockProvider implements ChatProvider {
 }
 
 function plan(messages: ChatMessage[]): Completion {
-  const customerId = Number(/customerId:\s*(\d+)/.exec(messages[0]?.content ?? '')?.[1]);
   const lastUser = messages.map((m) => m.role).lastIndexOf('user');
   const text = messages[lastUser]?.content ?? '';
   const turn = messages.slice(lastUser + 1);
@@ -57,7 +56,7 @@ function plan(messages: ChatMessage[]): Completion {
 
   if (WANTS_REFUND.test(text)) {
     if (!orderId) {
-      if (!has('list_orders')) return call('list_orders', { customerId }, 'Which order is this about? Let me pull up your orders.');
+      if (!has('list_orders')) return call('list_orders', {}, 'Which order is this about? Let me pull up your orders.');
       return say(`Which order would you like refunded? ${describeOrders(last!.result)}`);
     }
     if (!has('get_order')) return call('get_order', { orderId }, `I'll check order #${orderId} before requesting a refund.`);
@@ -78,14 +77,14 @@ function plan(messages: ChatMessage[]): Completion {
 
   if (WANTS_TICKET.test(text)) {
     if (!has('create_ticket')) {
-      return call('create_ticket', { customerId, subject: text.slice(0, 80).trim() || 'Support request', body: text },
+      return call('create_ticket', { subject: text.slice(0, 80).trim() || 'Support request', body: text },
         "I'll open a support ticket so the team can follow up.");
     }
     return say(`I've opened ticket #${last!.result.ticket.id}. Our team will get back to you by email.`);
   }
 
   if (WANTS_ORDERS.test(text) && !orderId) {
-    if (!has('list_orders')) return call('list_orders', { customerId }, 'Let me pull up your orders.');
+    if (!has('list_orders')) return call('list_orders', {}, 'Let me pull up your orders.');
     return say(`Here are your orders. ${describeOrders(last!.result)}`);
   }
 

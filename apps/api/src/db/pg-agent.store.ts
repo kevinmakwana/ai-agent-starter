@@ -1,11 +1,15 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type { Pool } from 'pg';
+import { ConflictError } from '../agent/errors';
 import type { Action, ActionStatus, AgentStore, Conversation, NewAction, NewStep, Run, Step } from '../agent/types';
 import { camel } from './pool';
 
 const hashToken = (token: string) => createHash('sha256').update(token).digest('hex');
 
 const TERMINAL = ['completed', 'failed', 'step_limit'];
+
+/** A 'running' run with no step activity for this long is assumed to have died with its process. */
+export const STALE_RUN_MS = 10 * 60_000;
 
 export interface ConversationSummary extends Conversation {
   lastStatus: string | null;
@@ -21,7 +25,7 @@ export interface ApprovalView extends Action {
 }
 
 export class PgAgentStore implements AgentStore {
-  constructor(private readonly pool: Pool) {}
+  constructor(private readonly pool: Pool, private readonly staleRunMs = STALE_RUN_MS) {}
 
   private static readonly CONVERSATION = `
     SELECT c.id, c.customer_id, c.title, c.created_at, cu.name AS customer_name, cu.email AS customer_email
@@ -64,9 +68,37 @@ export class PgAgentStore implements AgentStore {
     return (rowCount ?? 0) > 0;
   }
 
+  /**
+   * One active run per conversation. A short transaction under a per-conversation advisory lock makes
+   * check-then-insert atomic without holding a connection (or the lock) for the length of the run.
+   */
   async createRun(conversationId: string): Promise<Run> {
-    const { rows } = await this.pool.query("INSERT INTO runs (conversation_id, status) VALUES ($1, 'running') RETURNING *", [conversationId]);
-    return camel<Run>(rows[0]);
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [conversationId]);
+      await client.query(
+        `UPDATE runs r SET status = 'failed', error = 'Abandoned: the process died mid-run', finished_at = now()
+         WHERE r.conversation_id = $1 AND r.status = 'running'
+           AND r.created_at < now() - $2::double precision * interval '1 millisecond'
+           AND NOT EXISTS (SELECT 1 FROM steps s WHERE s.run_id = r.id
+                           AND s.created_at > now() - $2::double precision * interval '1 millisecond')`,
+        [conversationId, this.staleRunMs],
+      );
+      const busy = await client.query(
+        "SELECT 1 FROM runs WHERE conversation_id = $1 AND status IN ('running', 'awaiting_approval') LIMIT 1",
+        [conversationId],
+      );
+      if (busy.rowCount) throw new ConflictError('This conversation already has a run in progress or waiting for approval.');
+      const { rows } = await client.query("INSERT INTO runs (conversation_id, status) VALUES ($1, 'running') RETURNING *", [conversationId]);
+      await client.query('COMMIT');
+      return camel<Run>(rows[0]);
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
   }
 
   async getRun(id: string): Promise<Run | null> {
@@ -131,6 +163,14 @@ export class PgAgentStore implements AgentStore {
     return rows[0] ? camel<Action>(rows[0]) : null;
   }
 
+  async reopenAction(id: string): Promise<void> {
+    await this.pool.query(
+      `UPDATE actions SET status = 'pending_approval', decision_note = NULL, decided_at = NULL
+       WHERE id = $1 AND status <> 'pending_approval' AND result IS NULL`,
+      [id],
+    );
+  }
+
   async setActionResult(id: string, result: unknown): Promise<void> {
     await this.pool.query('UPDATE actions SET result = $2 WHERE id = $1', [id, JSON.stringify(result)]);
   }
@@ -141,7 +181,7 @@ export class PgAgentStore implements AgentStore {
   }
 
   /** Approvals enriched with what a reviewer needs: who asked, what they said, and the order's money position. */
-  async listApprovals(status?: ActionStatus): Promise<ApprovalView[]> {
+  async listApprovals(filter: { status?: ActionStatus; conversationId?: string } = {}): Promise<ApprovalView[]> {
     const { rows } = await this.pool.query(
       `SELECT a.*, cu.name AS customer_name, cu.email AS customer_email,
          (SELECT content FROM steps s WHERE s.run_id = a.run_id AND s.role = 'user' ORDER BY s.id LIMIT 1) AS user_message,
@@ -151,9 +191,9 @@ export class PgAgentStore implements AgentStore {
        JOIN conversations c ON c.id = a.conversation_id
        JOIN customers cu ON cu.id = c.customer_id
        LEFT JOIN orders o ON o.id = (a.tool_args->>'orderId')::int
-       WHERE ($1::text IS NULL OR a.status = $1)
+       WHERE ($1::text IS NULL OR a.status = $1) AND ($2::uuid IS NULL OR a.conversation_id = $2)
        ORDER BY a.created_at DESC LIMIT 200`,
-      [status ?? null],
+      [filter.status ?? null, filter.conversationId ?? null],
     );
     return rows.map((r) => camel<ApprovalView>(r));
   }

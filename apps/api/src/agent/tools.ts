@@ -50,11 +50,10 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'list_orders',
-    description: 'List all orders (id, status, total, date) for a customer.',
-    inputSchema: { type: 'object', properties: { customerId: id }, required: ['customerId'], additionalProperties: false },
-    async execute(ctx, { customerId }: { customerId: number }) {
-      assertSameCustomer(ctx.customerId, customerId, `Customer #${customerId}`);
-      const orders = await ctx.shop.listOrders(customerId);
+    description: "List all orders (id, status, total, date) for this conversation's customer.",
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    async execute(ctx) {
+      const orders = await ctx.shop.listOrders(ctx.customerId);
       return {
         orders: orders.map((o) => ({ id: o.id, status: o.status, total: o.total, itemCount: o.items.length, createdAt: o.createdAt })),
       };
@@ -72,20 +71,18 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'create_ticket',
-    description: 'Open a support ticket for a customer.',
+    description: "Open a support ticket for this conversation's customer.",
     inputSchema: {
       type: 'object',
       properties: {
-        customerId: id,
         subject: { type: 'string', minLength: 3, maxLength: 120 },
         body: { type: 'string', minLength: 1, maxLength: 2000 },
       },
-      required: ['customerId', 'subject', 'body'],
+      required: ['subject', 'body'],
       additionalProperties: false,
     },
-    async execute(ctx, args: { customerId: number; subject: string; body: string }) {
-      assertSameCustomer(ctx.customerId, args.customerId, `Customer #${args.customerId}`);
-      const ticket = await ctx.shop.createTicket(args);
+    async execute(ctx, { subject, body }: { subject: string; body: string }) {
+      const ticket = await ctx.shop.createTicket({ customerId: ctx.customerId, subject, body });
       return { ticket: { id: ticket.id, status: ticket.status, subject: ticket.subject } };
     },
   },

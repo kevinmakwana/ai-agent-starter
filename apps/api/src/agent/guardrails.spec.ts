@@ -39,15 +39,22 @@ describe('tool-level guardrails (conversation bound to customer 1)', () => {
 
   it('lets the bound customer read their own data', async () => {
     await expect(tool('get_order').execute(ctx(), { orderId: 1 })).resolves.toMatchObject({ order: { id: 1 } });
-    await expect(tool('list_orders').execute(ctx(), { customerId: 1 })).resolves.toMatchObject({ orders: [{ id: 1 }, { id: 3 }] });
+    await expect(tool('list_orders').execute(ctx(), {})).resolves.toMatchObject({ orders: [{ id: 1 }, { id: 3 }] });
+  });
+
+  it('always acts on the bound customer, even if a customerId slips past schema validation', async () => {
+    const shop = new MemoryShop();
+    const c: ToolContext = { customerId: 1, shop };
+    const orders = (await tool('list_orders').execute(c, { customerId: 2 })) as { orders: { id: number }[] };
+    expect(orders.orders.map((o) => o.id)).toEqual([1, 3]); // customer 2's order #2 is never returned
+    await tool('create_ticket').execute(c, { customerId: 2, subject: 'hi there', body: 'x' });
+    expect(shop.tickets).toMatchObject([{ customerId: 1 }]);
   });
 
   it('blocks cross-customer reads and writes', async () => {
     const c = ctx();
     await expect(tool('get_order').execute(c, { orderId: 2 })).rejects.toMatchObject({ code: 'CROSS_CUSTOMER' });
-    await expect(tool('list_orders').execute(c, { customerId: 2 })).rejects.toMatchObject({ code: 'CROSS_CUSTOMER' });
     await expect(tool('get_customer').execute(c, { email: 'ben.carter@example.com' })).rejects.toMatchObject({ code: 'CROSS_CUSTOMER' });
-    await expect(tool('create_ticket').execute(c, { customerId: 2, subject: 'hi there', body: 'x' })).rejects.toMatchObject({ code: 'CROSS_CUSTOMER' });
     await expect(tool('issue_refund').preflight!(c, { orderId: 2, amount: 5, reason: 'nope' })).rejects.toMatchObject({ code: 'CROSS_CUSTOMER' });
   });
 

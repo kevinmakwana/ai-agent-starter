@@ -71,10 +71,11 @@ describe('AnthropicProvider', () => {
 
 describe('MockProvider', () => {
   it('is deterministic for the same history', async () => {
-    const msgs: ChatMessage[] = [{ role: 'system', content: 'customerId: 4' }, { role: 'user', content: 'show my recent orders' }];
+    const msgs: ChatMessage[] = [{ role: 'system', content: 'You are the Acme Shop agent.' }, { role: 'user', content: 'show my recent orders' }];
     const a = await new MockProvider().complete(msgs);
     const b = await new MockProvider().complete(msgs);
     expect(a).toEqual(b);
-    expect(a.toolCalls[0]).toMatchObject({ name: 'list_orders', args: { customerId: 4 } });
+    expect(a.toolCalls[0].name).toBe('list_orders');
+    expect(a.toolCalls[0].args).toEqual({}); // the conversation, not the model, decides whose orders
   });
 });

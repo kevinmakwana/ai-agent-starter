@@ -4,9 +4,9 @@ describe('tool input schemas', () => {
   it('accepts valid arguments for every tool', () => {
     const valid: Record<string, unknown> = {
       get_customer: { email: 'ava.brooks@example.com' },
-      list_orders: { customerId: 1 },
+      list_orders: {},
       get_order: { orderId: 7 },
-      create_ticket: { customerId: 1, subject: 'Late parcel', body: 'It has not arrived.' },
+      create_ticket: { subject: 'Late parcel', body: 'It has not arrived.' },
       issue_refund: { orderId: 7, amount: 12.5, reason: 'Arrived damaged' },
     };
     for (const t of TOOLS) expect(validateToolInput(t.name, valid[t.name])).toEqual({ ok: true });
@@ -15,10 +15,11 @@ describe('tool input schemas', () => {
   it.each([
     ['get_customer', { email: 'not-an-email' }],
     ['get_customer', {}],
-    ['list_orders', { customerId: '1' }],
-    ['list_orders', { customerId: 1.5 }],
+    ['list_orders', { customerId: 1 }], // the conversation decides whose orders; the model can't pick
+    ['list_orders', 'not an object'],
     ['get_order', { orderId: 0 }],
-    ['create_ticket', { customerId: 1, subject: 'x', body: 'ok' }],
+    ['create_ticket', { subject: 'x', body: 'ok' }],
+    ['create_ticket', { customerId: 1, subject: 'Late parcel', body: 'ok' }],
     ['issue_refund', { orderId: 1, amount: -5, reason: 'because' }],
     ['issue_refund', { orderId: 1, amount: 5 }],
     ['issue_refund', { orderId: 1, amount: 5, reason: 'because', extra: true }],

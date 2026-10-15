@@ -113,6 +113,7 @@ export interface ShopRepo {
 /** Persistence for runs, steps and approvals. */
 export interface AgentStore {
   getConversation(id: string): Promise<Conversation | null>;
+  /** Starts a run, or throws ConflictError if the conversation already has one running or awaiting approval. */
   createRun(conversationId: string): Promise<Run>;
   getRun(id: string): Promise<Run | null>;
   updateRun(id: string, patch: Partial<Pick<Run, 'status' | 'modelCalls' | 'error'>>): Promise<Run>;
@@ -122,6 +123,8 @@ export interface AgentStore {
   getAction(id: string): Promise<Action | null>;
   /** Atomic claim: only succeeds while the action is still pending_approval. */
   decideAction(id: string, status: 'approved' | 'rejected', note?: string): Promise<Action | null>;
+  /** Undoes a claim whose execution failed before producing a result, so the reviewer can decide again. */
+  reopenAction(id: string): Promise<void>;
   setActionResult(id: string, result: unknown): Promise<void>;
 }
 
