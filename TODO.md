@@ -9,10 +9,10 @@
 - [x] 1.6 Show customers a generic message instead of `run.error`; keep the detail in the reviewer trace only.
 
 ## Phase 2: Safety and cost
-- [ ] 2.1 helmet, CORS config and rate limiting (stricter on `POST /conversations` and `POST /messages`).
-- [ ] 2.2 Aggregate tokens per run/conversation and add a configurable token budget.
-- [ ] 2.3 Cap the context sent to the model (sliding window or summary); load steps once per run.
-- [ ] 2.4 Expire pending approvals (configurable TTL, auto-reject with a note).
+- [x] 2.1 helmet, CORS config and rate limiting (stricter on `POST /conversations` and `POST /messages`).
+- [x] 2.2 Aggregate tokens per run/conversation and add a configurable token budget.
+- [x] 2.3 Cap the context sent to the model (sliding window or summary); load steps once per run.
+- [x] 2.4 Expire pending approvals (configurable TTL, auto-reject with a note).
 
 ## Phase 3: Real-provider confidence
 - [ ] 3.1 Retries with backoff and jitter for 429/5xx and network errors (honour `Retry-After`).

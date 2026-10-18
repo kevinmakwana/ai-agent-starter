@@ -4,6 +4,7 @@ import type { Pool } from 'pg';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { ConflictError, UpstreamLlmError } from '../src/agent/errors';
+import { ApprovalExpiry } from '../src/agent/approval-expiry';
 import { PgAgentStore } from '../src/db/pg-agent.store';
 import { PgShopRepo } from '../src/db/pg-shop.repo';
 import { seedDatabase } from '../src/db/seed-data';
@@ -209,6 +210,25 @@ maybe('approval flow (e2e, real Postgres)', () => {
       expect(trace.body.approvals[0]).toMatchObject({ conversationId: mine, status: 'pending_approval', toolArgs: { orderId: 1 } });
     });
 
+    it('auto-rejects an approval nobody decided within the TTL and frees the conversation', async () => {
+      const stale = await newConversation(1);
+      const fresh = await newConversation(2);
+      await http().post(`/conversations/${stale}/messages`).send({ content: 'refund order #1' }).expect(201);
+      await http().post(`/conversations/${fresh}/messages`).send({ content: 'refund order #2' }).expect(201);
+      await pool.query("UPDATE actions SET created_at = now() - interval '25 hours' WHERE conversation_id = $1", [stale]);
+
+      expect(await app.get(ApprovalExpiry).sweep()).toEqual({ expired: 1, failed: 0 });
+
+      const rejected = (await http().get('/approvals?status=rejected')).body;
+      expect(rejected).toHaveLength(1);
+      expect(rejected[0]).toMatchObject({ conversationId: stale, decisionNote: expect.stringContaining('Expired') });
+      const pending = (await http().get('/approvals?status=pending')).body;
+      expect(pending.map((a: any) => a.conversationId)).toEqual([fresh]);
+      const { rows } = await pool.query('SELECT count(*)::int AS n FROM refunds');
+      expect(rows[0].n).toBe(1); // only the seed's prior partial refund on order 12; nothing was refunded
+      await http().post(`/conversations/${stale}/messages`).send({ content: 'show my recent orders' }).expect(201); // no longer blocked
+    });
+
     it('starts a conversation by customer email (case-insensitive)', async () => {
       const res = await http().post('/conversations').send({ email: 'AVA.BROOKS@example.com' }).expect(201);
       expect(res.body).toMatchObject({ customerId: 1, accessToken: expect.any(String) });
@@ -298,6 +318,43 @@ maybe('approval flow (e2e, real Postgres)', () => {
       const trace = await http().get(`/conversations/${id}`).expect(200);
       expect(trace.body.runs).toHaveLength(1);
       expect(trace.body.runs[0].steps.map((s: any) => s.role)).toEqual(['user', 'assistant']);
+    });
+  });
+
+  describe('token accounting with a 1-token budget', () => {
+    const reviewer = { Authorization: 'Bearer s3cret' };
+    beforeEach(() => {
+      process.env.CONVERSATION_TOKEN_BUDGET = '1';
+      process.env.REVIEWER_API_KEY = 's3cret';
+      return boot();
+    });
+    afterEach(() => { delete process.env.CONVERSATION_TOKEN_BUDGET; delete process.env.REVIEWER_API_KEY; });
+
+    it('reports usage per run and conversation, then stops the agent once the budget is spent', async () => {
+      const res = await http().post('/conversations').send({ customerId: 1 }).expect(201);
+      const id = res.body.id as string;
+      const token = { 'X-Conversation-Token': res.body.accessToken as string };
+      const send = (content: string) => http().post(`/conversations/${id}/messages`).set(token).send({ content });
+
+      expect((await send('hello').expect(201)).body.run.status).toBe('completed'); // one model call, no tools; 0 used < 1: allowed
+
+      const second = await send('and again').expect(201);
+      expect(second.body.run).toMatchObject({ status: 'budget_exceeded', modelCalls: 0 });
+      expect(second.body.run.steps.at(-1)).toMatchObject({ result: { code: 'TOKEN_BUDGET' }, content: expect.stringContaining('usage limit') });
+
+      const trace = (await http().get(`/conversations/${id}`).set(token).expect(200)).body;
+      const sum = (key: 'inputTokens' | 'outputTokens') =>
+        trace.runs.flatMap((r: any) => r.steps).reduce((n: number, st: any) => n + (st[key] ?? 0), 0);
+      expect(sum('inputTokens')).toBeGreaterThan(0);
+      expect(trace.usage).toEqual({
+        inputTokens: sum('inputTokens'), outputTokens: sum('outputTokens'),
+        totalTokens: sum('inputTokens') + sum('outputTokens'), budget: 1,
+      });
+      expect(trace.runs[0].usage.totalTokens).toBe(trace.usage.totalTokens); // all spent in the first run
+      expect(trace.runs[1].usage).toEqual({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
+
+      const list = (await http().get('/conversations').set(reviewer).expect(200)).body;
+      expect(list.find((c: any) => c.id === id).totalTokens).toBe(trace.usage.totalTokens);
     });
   });
 

@@ -84,6 +84,13 @@ export class MemoryStore implements AgentStore {
     return step;
   }
   async listSteps(conversationId: string) { return this.steps.filter((s) => s.conversationId === conversationId); }
+  async conversationUsage(conversationId: string) {
+    const mine = this.steps.filter((x) => x.conversationId === conversationId);
+    return {
+      inputTokens: mine.reduce((n, x) => n + (x.inputTokens ?? 0), 0),
+      outputTokens: mine.reduce((n, x) => n + (x.outputTokens ?? 0), 0),
+    };
+  }
   async createAction(a: NewAction) {
     const action: Action = { ...a, id: `act-${++this.n}`, status: 'pending_approval', decisionNote: null, result: null, createdAt: '', decidedAt: null };
     this.actions.set(action.id, action);
@@ -95,6 +102,11 @@ export class MemoryStore implements AgentStore {
     if (!a || a.status !== 'pending_approval') return null;
     Object.assign(a, { status, decisionNote: note ?? null, decidedAt: 'now' });
     return { ...a };
+  }
+  async listPendingActionsOlderThan(cutoff: Date) {
+    return [...this.actions.values()]
+      .filter((a) => a.status === 'pending_approval' && Date.parse(a.createdAt) < cutoff.getTime())
+      .map((a) => ({ ...a }));
   }
   async reopenAction(id: string) {
     const a = this.actions.get(id);

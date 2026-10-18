@@ -14,6 +14,7 @@ export const STALE_RUN_MS = 10 * 60_000;
 export interface ConversationSummary extends Conversation {
   lastStatus: string | null;
   pendingApprovals: number;
+  totalTokens: number;
 }
 
 export interface ApprovalView extends Action {
@@ -56,7 +57,8 @@ export class PgAgentStore implements AgentStore {
     const { rows } = await this.pool.query(`
       SELECT c.id, c.customer_id, c.title, c.created_at, cu.name AS customer_name, cu.email AS customer_email,
         (SELECT status FROM runs r WHERE r.conversation_id = c.id ORDER BY r.created_at DESC LIMIT 1) AS last_status,
-        (SELECT count(*)::int FROM actions a WHERE a.conversation_id = c.id AND a.status = 'pending_approval') AS pending_approvals
+        (SELECT count(*)::int FROM actions a WHERE a.conversation_id = c.id AND a.status = 'pending_approval') AS pending_approvals,
+        (SELECT COALESCE(SUM(COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0)), 0)::int FROM steps s WHERE s.conversation_id = c.id) AS total_tokens
       FROM conversations c JOIN customers cu ON cu.id = c.customer_id
       ORDER BY c.created_at DESC LIMIT 100`);
     return rows.map((r) => camel<ConversationSummary>(r));
@@ -130,6 +132,15 @@ export class PgAgentStore implements AgentStore {
     return camel<Step>(rows[0]);
   }
 
+  async conversationUsage(conversationId: string): Promise<{ inputTokens: number; outputTokens: number }> {
+    const { rows } = await this.pool.query(
+      `SELECT COALESCE(SUM(input_tokens), 0)::int AS "inputTokens", COALESCE(SUM(output_tokens), 0)::int AS "outputTokens"
+       FROM steps WHERE conversation_id = $1`,
+      [conversationId],
+    );
+    return rows[0];
+  }
+
   async listSteps(conversationId: string): Promise<Step[]> {
     const { rows } = await this.pool.query('SELECT * FROM steps WHERE conversation_id = $1 ORDER BY id', [conversationId]);
     return rows.map((r) => camel<Step>(r));
@@ -161,6 +172,14 @@ export class PgAgentStore implements AgentStore {
       [id, status, note ?? null],
     );
     return rows[0] ? camel<Action>(rows[0]) : null;
+  }
+
+  async listPendingActionsOlderThan(cutoff: Date): Promise<Action[]> {
+    const { rows } = await this.pool.query(
+      "SELECT * FROM actions WHERE status = 'pending_approval' AND created_at < $1 ORDER BY created_at LIMIT 100",
+      [cutoff],
+    );
+    return rows.map((r) => camel<Action>(r));
   }
 
   async reopenAction(id: string): Promise<void> {

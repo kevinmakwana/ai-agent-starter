@@ -2,10 +2,12 @@ export interface Customer { id: number; name: string; email: string; orderCount:
 
 export interface ConversationSummary {
   id: string; customerId: number; customerName: string; customerEmail: string; title: string;
-  createdAt: string; lastStatus: string | null; pendingApprovals: number;
+  createdAt: string; lastStatus: string | null; pendingApprovals: number; totalTokens?: number;
 }
 
-export type RunStatus = 'running' | 'awaiting_approval' | 'completed' | 'failed' | 'step_limit';
+export type RunStatus = 'running' | 'awaiting_approval' | 'completed' | 'failed' | 'step_limit' | 'budget_exceeded';
+
+export interface Usage { inputTokens: number; outputTokens: number; totalTokens: number }
 
 export interface Step {
   id: number; runId: string; role: 'user' | 'assistant' | 'tool'; content: string | null;
@@ -15,7 +17,7 @@ export interface Step {
 
 export interface Run {
   id: string; status: RunStatus; modelCalls: number; error: string | null;
-  createdAt: string; finishedAt: string | null; steps: Step[];
+  createdAt: string; finishedAt: string | null; usage: Usage; steps: Step[];
 }
 
 export interface Approval {
@@ -31,4 +33,5 @@ export interface ConversationDetail {
   conversation: ConversationSummary;
   runs: Run[];
   approvals: Approval[];
+  usage: Usage & { budget: number };
 }

@@ -1,8 +1,10 @@
 import { Controller, Get, Inject, ServiceUnavailableException } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
 import type { Pool } from 'pg';
 import type { AppConfig } from '../config';
 import { APP_CONFIG, PG_POOL } from '../tokens';
 
+@SkipThrottle()
 @Controller('health')
 export class HealthController {
   constructor(@Inject(PG_POOL) private readonly pool: Pool, @Inject(APP_CONFIG) private readonly cfg: AppConfig) {}

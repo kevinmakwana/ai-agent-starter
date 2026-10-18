@@ -9,7 +9,8 @@ import { PgShopRepo } from '../db/pg-shop.repo';
 import { APP_CONFIG, PG_POOL } from '../tokens';
 import { ConversationAccessGuard } from './conversation-access.guard';
 import { CreateConversationDto, SendMessageDto } from './dto';
-import { forCaller } from './run-view';
+import { limited } from './rate-limit';
+import { forCaller, sumUsage } from './run-view';
 import { isReviewer, ReviewerGuard } from './reviewer.guard';
 
 @Controller()
@@ -34,6 +35,7 @@ export class ConversationsController {
 
   /** Returns the conversation plus its one-time `accessToken`. Who may *start* one is still unauthenticated (see README). */
   @Post('conversations')
+  @limited((l) => l.startPerMinute)
   async create(@Body() dto: CreateConversationDto) {
     const customer = dto.customerId
       ? await this.shop.getCustomer(dto.customerId)
@@ -61,12 +63,17 @@ export class ConversationsController {
     ]);
     return {
       conversation,
-      runs: runs.map((run) => ({ ...forCaller(run, this.isReviewer(req)), steps: steps.filter((s) => s.runId === run.id) })),
+      runs: runs.map((run) => {
+        const runSteps = steps.filter((s) => s.runId === run.id);
+        return { ...forCaller(run, this.isReviewer(req)), usage: sumUsage(runSteps), steps: runSteps };
+      }),
+      usage: { ...sumUsage(steps), budget: this.cfg.conversationTokenBudget },
       approvals,
     };
   }
 
   @Post('conversations/:id/messages')
+  @limited((l) => l.messagesPerMinute)
   @UseGuards(ConversationAccessGuard)
   async send(@Param('id', ParseUUIDPipe) id: string, @Body() dto: SendMessageDto, @Req() req: Request) {
     const conv = await this.requireConversation(id);
@@ -75,7 +82,7 @@ export class ConversationsController {
     }
     const run = await this.runner.handleUserMessage(conv, dto.content);
     const steps = (await this.store.listSteps(id)).filter((s) => s.runId === run.id);
-    return { run: { ...forCaller(run, this.isReviewer(req)), steps } };
+    return { run: { ...forCaller(run, this.isReviewer(req)), usage: sumUsage(steps), steps } };
   }
 
   private isReviewer(req: Request) {

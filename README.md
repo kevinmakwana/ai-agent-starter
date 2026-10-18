@@ -97,7 +97,7 @@ It asks "Where is my order #1?" and expects a valid `get_order` tool call back.
 | --- | --- |
 | `POST /conversations` | Create a conversation bound to `{ customerId }` or `{ email }`; returns the conversation plus its one-time `accessToken` |
 | `GET /conversations` | 🔒 reviewer: list all conversations (with pending-approval counts) |
-| `GET /conversations/:id` | 🔑 Full trace: runs → steps, plus approvals |
+| `GET /conversations/:id` | 🔑 Full trace: runs → steps, plus approvals and token `usage` (per run and per conversation, with the budget) |
 | `POST /conversations/:id/messages` | 🔑 Send `{ content }`; runs the agent until it answers or pauses (`409` while another run is in progress or an approval is pending) |
 | `GET /approvals?status=pending` | 🔒  List approvals (`pending` \| `approved` \| `rejected` \| `all`) with customer, order and reasoning context |
 | `POST /approvals/:id` | 🔒 `{ decision: "approve" \| "reject", note? }`; executes the parked call and resumes the run (`409` if already decided) |
@@ -121,6 +121,13 @@ One root `.env` (see [.env.example](.env.example)); everything is optional.
 | `API_URL` | `http://localhost:3001` | Where Next.js proxies `/api/*` |
 | `REVIEWER_API_KEY` | _(unset)_ | If set, reviewer routes require `Authorization: Bearer <key>` and conversations require their access token; unset = open demo mode |
 | `AGENT_MAX_STEPS` | `8` | Max model calls per run |
+| `CONVERSATION_TOKEN_BUDGET` | `200000` | Max tokens (input + output) per conversation; after that the agent stops calling the model and the run ends `budget_exceeded`. A soft cap: the call that crosses it still completes |
+| `CONTEXT_MAX_TOKENS` | `8000` | Rough cap on the history sent per model call. Whole old turns are left out (the model is told); the stored trace is never trimmed |
+| `APPROVAL_TTL_MINUTES` | `1440` | Pending approvals older than this are auto-rejected and the agent tells the customer. `0` = never |
+| `RATE_LIMIT_PER_MINUTE` | `600` | Per-client limit across the API (`/health` is exempt) |
+| `RATE_LIMIT_START_PER_MINUTE` / `RATE_LIMIT_MESSAGES_PER_MINUTE` | `10` / `20` | Stricter per-client limits on `POST /conversations` and `POST /conversations/:id/messages` |
+| `CORS_ORIGINS` | _(empty)_ | Comma-separated exact origins allowed to call the API from a browser. Empty = none |
+| `TRUST_PROXY` | `0` | Proxy hops whose `X-Forwarded-For` is trusted for client identity (see Security notes) |
 | `LLM_PROVIDER` | `mock` | `mock` \| `openai` \| `anthropic` |
 | `MOCK_DELAY_MS` | `150` | Artificial mock latency so the live trace is visible |
 | `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_BASE_URL` | – / `gpt-4o-mini` / OpenAI URL | OpenAI (or compatible) settings |
@@ -135,6 +142,7 @@ E2E_DATABASE_URL=postgres://postgres:postgres@localhost:5432/aiagent npm test   
 ```
 
 - **Unit (Jest):** tool schema validation, guardrail rules (cross-customer access and over-refund blocked), provider adapters (including real-HTTP contract tests against a local server), and the agent loop with the mock provider: *lookup → refund request → pending approval → approve → refund recorded*, plus rejection, step limit, unknown tools and provider failure.
+- Jest runs test files one at a time (`maxWorkers: 1`) because the e2e suites share one database.
 - **E2E:** the same approval flow over HTTP against real Postgres, plus input validation, reviewer-key and conversation-token access rules, the approval-time balance re-check and the `502` mapping. **It re-seeds the target database**, so point it at a disposable one.
 - CI runs typecheck, tests (with a Postgres service container) and build on every push.
 
@@ -150,6 +158,10 @@ This is a **starter, not a production service**. What is and isn't protected:
 - **Still not solved: who may start a conversation.** There is no customer login, so anyone can start a conversation as any customer by `customerId` or account email. The guardrails bind *the agent* to that customer; they can't prove *the caller is* that customer. Plug in a real identity provider (derive the customer from the session, not the body) before using real data.
 - **Reviewer identity is one shared key**: no per-reviewer accounts, no four-eyes rule (approver ≠ requester), no audit trail of who decided.
 - Upstream LLM error bodies are logged server-side only and never returned to clients.
+- **HTTP hardening.** `helmet` sets standard security headers, CORS is off unless `CORS_ORIGINS` lists exact origins, and requests are rate limited per client (`429` with `Retry-After`), most tightly on starting conversations and sending messages since those cost LLM calls.
+- **Client identity behind proxies.** Rate limits key on the client address. Without `TRUST_PROXY` that is the socket peer, so behind the bundled Next.js proxy every customer shares one bucket (fine for a demo, too coarse for production). Set `TRUST_PROXY=1` only when a trusted load balancer in front sets `X-Forwarded-For`; if the proxy is directly exposed, clients can spoof the header.
+- **Cost controls.** Each conversation has a token budget, the history sent to the model is capped, and `GET /conversations/:id` reports `usage` per run and per conversation. Failed runs show customers a generic error; reviewers see the real one.
+- **Approvals expire.** Pending approvals are auto-rejected after `APPROVAL_TTL_MINUTES`. The sweep runs in-process every minute, so it assumes a single API instance.
 
 ## Next steps
 
@@ -157,7 +169,7 @@ This is a **starter, not a production service**. What is and isn't protected:
 - Real identity: customer login (so the customer comes from a session, not the request body), per-reviewer accounts, four-eyes approval and an audit log (see Security notes).
 - Run steps as a background job (queue) so long agent runs don't hold an HTTP request open.
 - Prompt-injection and eval suites; replay recorded traces against new prompts or models.
-- Per-tool rate limits, cost budgets and token accounting per conversation.
+- Per-tool rate limits and spend budgets across conversations (per-conversation token budgets exist).
 - Real migrations (the schema is idempotent DDL applied on boot) and multi-tenant data.
 
 ## License
