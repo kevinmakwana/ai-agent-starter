@@ -49,7 +49,7 @@ export function TracePanel({ detail }: { detail: ConversationDetail | null }) {
     <div className="trace">
       <div className="muted pad">
         Conversation usage: {detail.usage.totalTokens.toLocaleString()} of {detail.usage.budget.toLocaleString()} tokens
-        {' '}({detail.usage.inputTokens.toLocaleString()} in · {detail.usage.outputTokens.toLocaleString()} out)
+        {' '}({detail.usage.inputTokens.toLocaleString()} in · {detail.usage.outputTokens.toLocaleString()} out · {detail.usage.cachedInputTokens.toLocaleString()} cached)
       </div>
       {detail.runs.map((run, i) => {
         const total = run.finishedAt ? new Date(run.finishedAt).getTime() - new Date(run.createdAt).getTime() : null;
@@ -58,8 +58,13 @@ export function TracePanel({ detail }: { detail: ConversationDetail | null }) {
             <header>
               <b>Run {i + 1}</b>
               <span className={`chip ${run.status}`}>{run.status.replace('_', ' ')}</span>
-              <span className="muted">{run.modelCalls} model call{run.modelCalls === 1 ? '' : 's'} · {run.usage.totalTokens.toLocaleString()} tokens{total != null && ` · ${ms(total)}`}</span>
+              <span className="muted">{run.modelCalls} model call{run.modelCalls === 1 ? '' : 's'} · {run.usage.totalTokens.toLocaleString()} tokens{run.usage.cachedInputTokens > 0 && ` (${run.usage.cachedInputTokens.toLocaleString()} cached)`}{total != null && ` · ${ms(total)}`}</span>
             </header>
+            {run.provider && (
+              <div className="muted">
+                {run.provider}{run.model && run.model !== run.provider ? ` · ${run.model}` : ''}{run.promptVersion && ` · prompt ${run.promptVersion}`}
+              </div>
+            )}
             {run.steps.map((s) => (
               <StepCard key={s.id} step={s} run={run} approval={detail.approvals.find((a) => a.toolCallId === s.toolCallId && a.runId === run.id && s.role === 'assistant')} />
             ))}

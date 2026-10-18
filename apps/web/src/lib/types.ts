@@ -7,17 +7,19 @@ export interface ConversationSummary {
 
 export type RunStatus = 'running' | 'awaiting_approval' | 'completed' | 'failed' | 'step_limit' | 'budget_exceeded';
 
-export interface Usage { inputTokens: number; outputTokens: number; totalTokens: number }
+export interface Usage { inputTokens: number; outputTokens: number; totalTokens: number; cachedInputTokens: number }
 
 export interface Step {
   id: number; runId: string; role: 'user' | 'assistant' | 'tool'; content: string | null;
   toolName: string | null; toolArgs: unknown; toolCallId: string | null; result: any;
-  latencyMs: number | null; inputTokens: number | null; outputTokens: number | null; createdAt: string;
+  latencyMs: number | null; inputTokens: number | null; outputTokens: number | null; cachedInputTokens: number | null; createdAt: string;
 }
 
 export interface Run {
   id: string; status: RunStatus; modelCalls: number; error: string | null;
   createdAt: string; finishedAt: string | null; usage: Usage; steps: Step[];
+  /** What produced the run; null on runs recorded before this was tracked. */
+  provider: string | null; model: string | null; promptVersion: string | null;
 }
 
 export interface Approval {

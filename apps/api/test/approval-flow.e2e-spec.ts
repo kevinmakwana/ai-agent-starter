@@ -348,13 +348,32 @@ maybe('approval flow (e2e, real Postgres)', () => {
       expect(sum('inputTokens')).toBeGreaterThan(0);
       expect(trace.usage).toEqual({
         inputTokens: sum('inputTokens'), outputTokens: sum('outputTokens'),
-        totalTokens: sum('inputTokens') + sum('outputTokens'), budget: 1,
+        totalTokens: sum('inputTokens') + sum('outputTokens'), cachedInputTokens: 0, budget: 1,
       });
       expect(trace.runs[0].usage.totalTokens).toBe(trace.usage.totalTokens); // all spent in the first run
-      expect(trace.runs[1].usage).toEqual({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
+      expect(trace.runs[1].usage).toEqual({ inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedInputTokens: 0 });
 
       const list = (await http().get('/conversations').set(reviewer).expect(200)).body;
       expect(list.find((c: any) => c.id === id).totalTokens).toBe(trace.usage.totalTokens);
+    });
+  });
+
+  describe('with a provider that reports cache hits', () => {
+    beforeEach(() => boot({
+      name: 'cached', model: 'cached-1',
+      complete: async () => ({ text: 'hi', toolCalls: [], usage: { inputTokens: 1000, outputTokens: 20, cachedInputTokens: 900 } }),
+    }));
+
+    it('stores cached prompt tokens per step and reports them in the usage totals', async () => {
+      const id = await newConversation(1);
+      await http().post(`/conversations/${id}/messages`).send({ content: 'hello' }).expect(201);
+      await http().post(`/conversations/${id}/messages`).send({ content: 'again' }).expect(201);
+      const trace = (await http().get(`/conversations/${id}`).expect(200)).body;
+      expect(trace.runs[0].steps.at(-1)).toMatchObject({ inputTokens: 1000, outputTokens: 20, cachedInputTokens: 900 });
+      expect(trace.runs[0]).toMatchObject({ provider: 'cached', model: 'cached-1', promptVersion: expect.stringMatching(/^[0-9a-f]{8}$/) });
+      expect(trace.runs[1].promptVersion).toBe(trace.runs[0].promptVersion);
+      expect(trace.usage).toMatchObject({ inputTokens: 2000, outputTokens: 40, totalTokens: 2040, cachedInputTokens: 1800 });
+      expect(trace.runs[1].usage).toMatchObject({ totalTokens: 1020, cachedInputTokens: 900 });
     });
   });
 

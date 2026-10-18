@@ -46,6 +46,15 @@ describe('approval expiry config', () => {
   });
 });
 
+describe('LLM client config', () => {
+  it('retries twice by default, lets max tokens stay unset, and validates overrides', () => {
+    expect(loadConfig({})).toMatchObject({ llmMaxRetries: 2, llmMaxTokens: undefined });
+    expect(loadConfig({ LLM_MAX_RETRIES: '0', LLM_MAX_TOKENS: '2048' })).toMatchObject({ llmMaxRetries: 0, llmMaxTokens: 2048 });
+    expect(() => loadConfig({ LLM_MAX_RETRIES: '-1' })).toThrow('LLM_MAX_RETRIES');
+    expect(() => loadConfig({ LLM_MAX_TOKENS: '0' })).toThrow('LLM_MAX_TOKENS');
+  });
+});
+
 describe('HTTP hardening config', () => {
   it('is locked down by default: no CORS origins, no trusted proxy, generous-but-finite rate limits', () => {
     expect(loadConfig({})).toMatchObject({

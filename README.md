@@ -83,13 +83,15 @@ LLM_PROVIDER=anthropic          # or openai
 ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-The adapters use the models in `ANTHROPIC_MODEL` / `OPENAI_MODEL`. They are tested against mocked `fetch` and against a local HTTP server that speaks each wire format, but **not against the live vendor APIs** (that needs a key). Verify yours with one cheap call:
+The adapters use the models in `ANTHROPIC_MODEL` / `OPENAI_MODEL`. They retry transient failures, refuse to act on a response that was cut off at the token limit (a truncated tool call is never executed) or declined by the provider, and the Anthropic adapter asks for prompt caching (cache reads are counted in the token totals and shown in the trace). Each run records the provider, model and a prompt version (a hash of the system prompt and tool definitions), shown in the reviewer trace.
+
+They are tested against mocked `fetch` and against a local HTTP server that speaks each wire format, but **not against the live vendor APIs** from this repo's CI (that needs a key). Verify yours with a cheap two-call check:
 
 ```bash
 LLM_PROVIDER=anthropic ANTHROPIC_API_KEY=sk-ant-... npm run smoke:llm -w apps/api   # or openai
 ```
 
-It asks "Where is my order #1?" and expects a valid `get_order` tool call back.
+It asks "Where is my order #1?", validates the tool call against the real tool schema, feeds a tool result back, and expects a plain-text answer. The second call matters most: it replays the model's own tool call, which is where history-format problems show up. The same check runs weekly (and on demand) in the **LLM smoke** GitHub Actions workflow if you add `ANTHROPIC_API_KEY` and/or `OPENAI_API_KEY` as repository secrets; a provider without a secret is skipped.
 
 ## API
 
@@ -129,6 +131,8 @@ One root `.env` (see [.env.example](.env.example)); everything is optional.
 | `CORS_ORIGINS` | _(empty)_ | Comma-separated exact origins allowed to call the API from a browser. Empty = none |
 | `TRUST_PROXY` | `0` | Proxy hops whose `X-Forwarded-For` is trusted for client identity (see Security notes) |
 | `LLM_PROVIDER` | `mock` | `mock` \| `openai` \| `anthropic` |
+| `LLM_MAX_RETRIES` | `2` | Extra attempts for network errors, `408`, `429` and `5xx` from the provider (exponential backoff with jitter; honours `Retry-After`, but never waits longer than 30 s). `0` = off |
+| `LLM_MAX_TOKENS` | _(unset)_ | Output cap per model call; reasoning tokens count against it. Unset = Anthropic `4096`, OpenAI the model's own limit. A response cut off by the cap fails the run instead of being used |
 | `MOCK_DELAY_MS` | `150` | Artificial mock latency so the live trace is visible |
 | `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_BASE_URL` | – / `gpt-4o-mini` / OpenAI URL | OpenAI (or compatible) settings |
 | `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` | – / `claude-sonnet-5-5` | Anthropic settings |

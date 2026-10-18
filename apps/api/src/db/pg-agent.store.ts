@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type { Pool } from 'pg';
 import { ConflictError } from '../agent/errors';
-import type { Action, ActionStatus, AgentStore, Conversation, NewAction, NewStep, Run, Step } from '../agent/types';
+import type { Action, ActionStatus, AgentStore, Conversation, NewAction, NewStep, Run, RunMeta, Step } from '../agent/types';
 import { camel } from './pool';
 
 const hashToken = (token: string) => createHash('sha256').update(token).digest('hex');
@@ -74,7 +74,7 @@ export class PgAgentStore implements AgentStore {
    * One active run per conversation. A short transaction under a per-conversation advisory lock makes
    * check-then-insert atomic without holding a connection (or the lock) for the length of the run.
    */
-  async createRun(conversationId: string): Promise<Run> {
+  async createRun(conversationId: string, meta: Partial<RunMeta> = {}): Promise<Run> {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
@@ -92,7 +92,10 @@ export class PgAgentStore implements AgentStore {
         [conversationId],
       );
       if (busy.rowCount) throw new ConflictError('This conversation already has a run in progress or waiting for approval.');
-      const { rows } = await client.query("INSERT INTO runs (conversation_id, status) VALUES ($1, 'running') RETURNING *", [conversationId]);
+      const { rows } = await client.query(
+        "INSERT INTO runs (conversation_id, status, provider, model, prompt_version) VALUES ($1, 'running', $2, $3, $4) RETURNING *",
+        [conversationId, meta.provider ?? null, meta.model ?? null, meta.promptVersion ?? null],
+      );
       await client.query('COMMIT');
       return camel<Run>(rows[0]);
     } catch (e) {
@@ -123,11 +126,11 @@ export class PgAgentStore implements AgentStore {
 
   async addStep(s: NewStep): Promise<Step> {
     const { rows } = await this.pool.query(
-      `INSERT INTO steps (run_id, conversation_id, role, content, tool_name, tool_args, tool_call_id, result, latency_ms, input_tokens, output_tokens)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
+      `INSERT INTO steps (run_id, conversation_id, role, content, tool_name, tool_args, tool_call_id, result, latency_ms, input_tokens, output_tokens, cached_input_tokens)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
       [s.runId, s.conversationId, s.role, s.content ?? null, s.toolName ?? null,
        s.toolArgs === undefined ? null : JSON.stringify(s.toolArgs), s.toolCallId ?? null,
-       s.result === undefined ? null : JSON.stringify(s.result), s.latencyMs ?? null, s.inputTokens ?? null, s.outputTokens ?? null],
+       s.result === undefined ? null : JSON.stringify(s.result), s.latencyMs ?? null, s.inputTokens ?? null, s.outputTokens ?? null, s.cachedInputTokens ?? null],
     );
     return camel<Step>(rows[0]);
   }

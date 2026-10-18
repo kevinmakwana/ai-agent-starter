@@ -5,7 +5,7 @@ const conv = { customerName: 'Ava Brooks', customerEmail: 'ava.brooks@example.co
 let n = 0;
 const step = (s: Partial<Step> & Pick<Step, 'role'>): Step => ({
   id: ++n, runId: 'r', conversationId: 'c', content: null, toolName: null, toolArgs: null, toolCallId: null,
-  result: null, latencyMs: null, inputTokens: null, outputTokens: null, createdAt: '', ...s,
+  result: null, latencyMs: null, inputTokens: null, outputTokens: null, cachedInputTokens: null, createdAt: '', ...s,
 });
 const user = (content: string) => step({ role: 'user', content });
 const answer = (content: string) => step({ role: 'assistant', content });
