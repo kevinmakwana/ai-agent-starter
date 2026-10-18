@@ -1,5 +1,6 @@
 import { ConflictError, GuardrailViolation, NotFoundError } from './errors';
 import { buildMessages } from './context';
+import { promptVersion } from './prompt';
 import { toolByName, toolSpecs, validateToolInput, type ToolContext } from './tools';
 import type {
   Action,
@@ -46,7 +47,11 @@ export class AgentRunner {
   /** Starts a run for a new user message. Resolves when the run completes or pauses for approval. */
   async handleUserMessage(conv: Conversation, content: string): Promise<Run> {
     const { store } = this.deps;
-    const run = await store.createRun(conv.id);
+    const run = await store.createRun(conv.id, {
+      provider: this.deps.provider.name,
+      model: this.deps.provider.model ?? null,
+      promptVersion: promptVersion(),
+    });
     await store.addStep({ runId: run.id, conversationId: conv.id, role: 'user', content });
     return this.loop(run, conv);
   }
@@ -118,7 +123,11 @@ export class AgentRunner {
         const completion = await provider.complete(messages, toolSpecs());
         const latencyMs = Date.now() - started;
         run = await store.updateRun(run.id, { modelCalls: run.modelCalls + 1 });
-        const usage = { inputTokens: completion.usage?.inputTokens, outputTokens: completion.usage?.outputTokens };
+        const usage = {
+          inputTokens: completion.usage?.inputTokens,
+          outputTokens: completion.usage?.outputTokens,
+          cachedInputTokens: completion.usage?.cachedInputTokens,
+        };
 
         if (completion.toolCalls.length === 0) {
           await addStep({ ...base, role: 'assistant', content: completion.text ?? '', latencyMs, ...usage });

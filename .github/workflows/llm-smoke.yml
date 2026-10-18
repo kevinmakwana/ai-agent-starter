@@ -1,0 +1,57 @@
+name: LLM smoke
+
+# Calls the real vendor APIs, so it needs repository secrets and costs a few cents per run. It is not part of CI:
+# it runs weekly on the default branch and on demand (Actions tab > LLM smoke > Run workflow).
+# A provider whose secret is not set is skipped, not failed. A failing run emails the repo's watchers as usual.
+on:
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: Which provider to check
+        type: choice
+        options: [both, anthropic, openai]
+        default: both
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        provider: [anthropic, openai]
+    env:
+      LLM_PROVIDER: ${{ matrix.provider }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL }}
+      OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
+    steps:
+      - name: Decide whether to run
+        id: key
+        env:
+          WANTED: ${{ inputs.provider }}   # empty on scheduled runs, which check both
+          PROVIDER: ${{ matrix.provider }}
+        run: |
+          if [ -n "$WANTED" ] && [ "$WANTED" != "both" ] && [ "$WANTED" != "$PROVIDER" ]; then
+            echo "::notice::$PROVIDER was not selected; skipping."; echo "present=false" >> "$GITHUB_OUTPUT"
+          elif [ "$PROVIDER" = "anthropic" ] && [ -n "$ANTHROPIC_API_KEY" ]; then echo "present=true" >> "$GITHUB_OUTPUT"
+          elif [ "$PROVIDER" = "openai" ] && [ -n "$OPENAI_API_KEY" ]; then echo "present=true" >> "$GITHUB_OUTPUT"
+          else echo "::notice::No $PROVIDER API key secret configured; skipping."; echo "present=false" >> "$GITHUB_OUTPUT"; fi
+      - uses: actions/checkout@v5
+        if: steps.key.outputs.present == 'true'
+      - uses: actions/setup-node@v5
+        if: steps.key.outputs.present == 'true'
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+        if: steps.key.outputs.present == 'true'
+      - name: Smoke test ${{ matrix.provider }}
+        if: steps.key.outputs.present == 'true'
+        run: npm run smoke:llm -w apps/api

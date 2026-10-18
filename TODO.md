@@ -15,11 +15,12 @@
 - [x] 2.4 Expire pending approvals (configurable TTL, auto-reject with a note).
 
 ## Phase 3: Real-provider confidence
-- [ ] 3.1 Retries with backoff and jitter for 429/5xx and network errors (honour `Retry-After`).
-- [ ] 3.2 Handle `max_tokens` / `length` stop reasons so a truncated tool call is never executed.
-- [ ] 3.3 Configurable `max_tokens`; Anthropic prompt caching for system prompt and tools.
-- [ ] 3.4 Record provider, model and prompt version per run and show them in the trace UI.
-- [ ] 3.5 Scheduled/manual CI job for `smoke:llm` with repo secrets.
+- [x] 3.1 Retries with backoff and jitter for 429/5xx and network errors (honour `Retry-After`).
+- [x] 3.2 Handle `max_tokens` / `length` stop reasons so a truncated tool call is never executed.
+- [x] 3.3 Configurable `max_tokens`; Anthropic prompt caching for system prompt and tools.
+- [x] 3.4 Record provider, model and prompt version per run and show them in the trace UI.
+- [x] 3.5 Scheduled/manual CI job for `smoke:llm` with repo secrets.
+- [ ] 3.6 Verify against a live key that the Anthropic adapter's history is accepted when thinking is on (Sonnet 5.5 thinks by default): it drops `thinking` blocks when replaying a tool-call turn. If the API rejects that, preserve the blocks within the current turn only (older turns are trimmed by the context cap, which would break their signatures).
 
 ## Phase 4: Features
 - [ ] 4.1 SSE streaming of runs (API + `EventSource` in the web app).

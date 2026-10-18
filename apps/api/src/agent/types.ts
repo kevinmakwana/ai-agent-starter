@@ -41,7 +41,14 @@ export interface Conversation {
 
 export type RunStatus = 'running' | 'awaiting_approval' | 'completed' | 'failed' | 'step_limit' | 'budget_exceeded';
 
-export interface Run {
+/** What produced a run. Null on runs created before this was recorded. */
+export interface RunMeta {
+  provider: string | null;
+  model: string | null;
+  promptVersion: string | null;
+}
+
+export interface Run extends RunMeta {
   id: string;
   conversationId: string;
   status: RunStatus;
@@ -67,6 +74,8 @@ export interface Step {
   latencyMs: number | null;
   inputTokens: number | null;
   outputTokens: number | null;
+  /** Part of inputTokens the provider served from its prompt cache. */
+  cachedInputTokens: number | null;
   createdAt: string;
 }
 
@@ -114,7 +123,7 @@ export interface ShopRepo {
 export interface AgentStore {
   getConversation(id: string): Promise<Conversation | null>;
   /** Starts a run, or throws ConflictError if the conversation already has one running or awaiting approval. */
-  createRun(conversationId: string): Promise<Run>;
+  createRun(conversationId: string, meta?: Partial<RunMeta>): Promise<Run>;
   getRun(id: string): Promise<Run | null>;
   updateRun(id: string, patch: Partial<Pick<Run, 'status' | 'modelCalls' | 'error'>>): Promise<Run>;
   addStep(step: NewStep): Promise<Step>;
@@ -158,10 +167,13 @@ export interface ToolSpec {
 export interface Completion {
   text?: string;
   toolCalls: ToolCall[];
-  usage?: { inputTokens: number; outputTokens: number };
+  /** inputTokens counts every prompt token (cached or not); cachedInputTokens is the part served from the provider's cache. */
+  usage?: { inputTokens: number; outputTokens: number; cachedInputTokens?: number };
 }
 
 export interface ChatProvider {
   readonly name: string;
+  /** Model identifier, recorded on each run. */
+  readonly model?: string;
   complete(messages: ChatMessage[], tools: ToolSpec[]): Promise<Completion>;
 }

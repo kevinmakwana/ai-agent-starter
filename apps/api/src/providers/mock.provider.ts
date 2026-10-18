@@ -17,6 +17,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  */
 export class MockProvider implements ChatProvider {
   readonly name = 'mock';
+  readonly model = 'mock';
 
   constructor(private readonly delayMs = 0) {}
 

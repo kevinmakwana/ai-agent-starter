@@ -1,7 +1,7 @@
 import { ConflictError, GuardrailViolation } from '../src/agent/errors';
 import { assertRefundable, assertSameCustomer } from '../src/agent/guardrails';
 import type {
-  Action, AgentStore, Conversation, Customer, NewAction, NewStep, Order, Run, ShopRepo, Step, Ticket,
+  Action, AgentStore, Conversation, Customer, NewAction, NewStep, Order, Run, RunMeta, ShopRepo, Step, Ticket,
 } from '../src/agent/types';
 
 export const CUSTOMERS: Customer[] = [
@@ -59,12 +59,15 @@ export class MemoryStore implements AgentStore {
     return conv;
   }
   async getConversation(id: string) { return this.conversations.get(id) ?? null; }
-  async createRun(conversationId: string) {
+  async createRun(conversationId: string, meta: Partial<RunMeta> = {}) {
     const busy = [...this.runs.values()].some(
       (r) => r.conversationId === conversationId && (r.status === 'running' || r.status === 'awaiting_approval'),
     );
     if (busy) throw new ConflictError('This conversation already has a run in progress or waiting for approval.');
-    const run: Run = { id: `run-${++this.n}`, conversationId, status: 'running', modelCalls: 0, error: null, createdAt: '', finishedAt: null };
+    const run: Run = {
+      id: `run-${++this.n}`, conversationId, status: 'running', modelCalls: 0, error: null, createdAt: '', finishedAt: null,
+      provider: meta.provider ?? null, model: meta.model ?? null, promptVersion: meta.promptVersion ?? null,
+    };
     this.runs.set(run.id, run);
     return { ...run };
   }
@@ -77,7 +80,7 @@ export class MemoryStore implements AgentStore {
   async addStep(s: NewStep) {
     const step: Step = {
       id: this.steps.length + 1, content: null, toolName: null, toolArgs: null, toolCallId: null, result: null,
-      latencyMs: null, inputTokens: null, outputTokens: null, createdAt: '',
+      latencyMs: null, inputTokens: null, outputTokens: null, cachedInputTokens: null, createdAt: '',
       ...(Object.fromEntries(Object.entries(s).filter(([, v]) => v !== undefined)) as object),
     } as Step;
     this.steps.push(step);

@@ -48,6 +48,9 @@ CREATE TABLE IF NOT EXISTS runs (
 ALTER TABLE runs DROP CONSTRAINT IF EXISTS runs_status_check;
 ALTER TABLE runs ADD CONSTRAINT runs_status_check
   CHECK (status IN ('running', 'awaiting_approval', 'completed', 'failed', 'step_limit', 'budget_exceeded'));
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS provider text;
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS model text;
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS prompt_version text;
 CREATE INDEX IF NOT EXISTS runs_conversation_idx ON runs (conversation_id);
 
 CREATE TABLE IF NOT EXISTS steps (
@@ -65,6 +68,7 @@ CREATE TABLE IF NOT EXISTS steps (
   output_tokens int,
   created_at timestamptz NOT NULL DEFAULT now()
 );
+ALTER TABLE steps ADD COLUMN IF NOT EXISTS cached_input_tokens int;
 CREATE INDEX IF NOT EXISTS steps_conversation_idx ON steps (conversation_id, id);
 
 CREATE TABLE IF NOT EXISTS actions (

@@ -1,4 +1,6 @@
-import type { Conversation } from './types';
+import { createHash } from 'node:crypto';
+import { toolSpecs } from './tools';
+import type { Conversation, ToolSpec } from './types';
 
 export const systemPrompt = (c: Pick<Conversation, 'customerName' | 'customerEmail'>) =>
   [
@@ -9,3 +11,14 @@ export const systemPrompt = (c: Pick<Conversation, 'customerName' | 'customerEma
     'Look the order up first, then request a refund only when it is justified, and tell the customer it is pending review.',
     'Be brief and friendly.',
   ].join('\n');
+
+/**
+ * Short fingerprint of what shapes the model's behaviour besides the model itself: the system prompt template and
+ * the tool definitions. Computed, not hand-maintained, so editing either changes it and traces stay comparable.
+ */
+export function promptVersion(
+  tools: ToolSpec[] = toolSpecs(),
+  template: string = systemPrompt({ customerName: '{name}', customerEmail: '{email}' }),
+): string {
+  return createHash('sha256').update(JSON.stringify({ template, tools })).digest('hex').slice(0, 8);
+}

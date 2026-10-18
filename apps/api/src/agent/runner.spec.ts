@@ -1,6 +1,7 @@
 import { MemoryShop, MemoryStore } from '../../test/fakes';
 import { MockProvider } from '../providers/mock.provider';
 import { ConflictError } from './errors';
+import { promptVersion } from './prompt';
 import { AgentRunner } from './runner';
 import type { ChatMessage, ChatProvider, Completion } from './types';
 
@@ -96,6 +97,26 @@ describe('agent loop with the mock provider', () => {
     await runner.handleUserMessage(conv, 'show my recent orders');
     expect(store.steps.at(-1)?.content).toContain('#1');
     expect(store.actions.size).toBe(0);
+  });
+});
+
+describe('run metadata', () => {
+  it('records which provider, model and prompt version produced each run, and keeps it through an approval', async () => {
+    const { runner, store, conv } = setup();
+    await runner.handleUserMessage(conv, 'refund order #1');
+    const [run] = [...store.runs.values()];
+    expect(run).toMatchObject({ provider: 'mock', model: 'mock', promptVersion: promptVersion() });
+
+    const [action] = [...store.actions.values()];
+    await runner.decide(action.id, 'approve');
+    expect(store.runs.get(run.id)).toMatchObject({ provider: 'mock', model: 'mock', promptVersion: promptVersion() }); // same run, same provenance
+  });
+
+  it('records a null model for providers that do not name one', async () => {
+    const anonymous: ChatProvider = { name: 'anon', complete: async () => ({ text: 'hi', toolCalls: [] }) };
+    const { runner, store, conv } = setup(anonymous);
+    await runner.handleUserMessage(conv, 'hello');
+    expect([...store.runs.values()][0]).toMatchObject({ provider: 'anon', model: null });
   });
 });
 
@@ -222,6 +243,15 @@ describe('token budget', () => {
     const fresh = store.addConversation(2);
     const run = await runner.handleUserMessage(fresh, 'hello');
     expect(run.modelCalls).toBeGreaterThan(0); // not blocked by the other conversation's usage
+  });
+
+  it('records how many prompt tokens the provider served from its cache', async () => {
+    const cached: ChatProvider = {
+      name: 'cached', complete: async () => ({ text: 'hi', toolCalls: [], usage: { inputTokens: 100, outputTokens: 5, cachedInputTokens: 80 } }),
+    };
+    const { runner, store, conv } = setup(cached);
+    await runner.handleUserMessage(conv, 'hello');
+    expect(store.steps.at(-1)).toMatchObject({ inputTokens: 100, outputTokens: 5, cachedInputTokens: 80 });
   });
 
   it('has no limit unless a budget is configured', async () => {
