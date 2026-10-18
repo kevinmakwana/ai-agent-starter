@@ -1,7 +1,8 @@
 // Thin pass-through proxy to the NestJS API. It holds no secrets: the browser supplies its own
 // credential (a conversation token for customers, the reviewer key for the console).
 const apiUrl = () => process.env.API_URL ?? `http://localhost:${process.env.API_PORT ?? 3001}`;
-const FORWARDED = ['content-type', 'authorization', 'x-conversation-token'];
+// x-forwarded-for lets the API tell clients apart for rate limiting (only honoured when TRUST_PROXY is set there).
+const FORWARDED = ['content-type', 'authorization', 'x-conversation-token', 'x-forwarded-for'];
 
 async function proxy(req: Request, { params }: { params: Promise<{ path: string[] }> }) {
   const { path } = await params;

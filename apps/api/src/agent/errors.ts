@@ -22,7 +22,8 @@ export type GuardrailCode =
   | 'ORDER_CANCELLED'
   | 'UNKNOWN_TOOL'
   | 'INVALID_ARGUMENTS'
-  | 'STEP_LIMIT';
+  | 'STEP_LIMIT'
+  | 'TOKEN_BUDGET';
 
 /** A policy rule blocked a tool call. The message is safe to show to the model. */
 export class GuardrailViolation extends Error {

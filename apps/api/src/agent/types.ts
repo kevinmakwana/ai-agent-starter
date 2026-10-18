@@ -39,7 +39,7 @@ export interface Conversation {
   createdAt: string;
 }
 
-export type RunStatus = 'running' | 'awaiting_approval' | 'completed' | 'failed' | 'step_limit';
+export type RunStatus = 'running' | 'awaiting_approval' | 'completed' | 'failed' | 'step_limit' | 'budget_exceeded';
 
 export interface Run {
   id: string;
@@ -118,11 +118,15 @@ export interface AgentStore {
   getRun(id: string): Promise<Run | null>;
   updateRun(id: string, patch: Partial<Pick<Run, 'status' | 'modelCalls' | 'error'>>): Promise<Run>;
   addStep(step: NewStep): Promise<Step>;
+  /** Tokens the model has billed this conversation so far (summed over its steps). */
+  conversationUsage(conversationId: string): Promise<{ inputTokens: number; outputTokens: number }>;
   listSteps(conversationId: string): Promise<Step[]>;
   createAction(action: NewAction): Promise<Action>;
   getAction(id: string): Promise<Action | null>;
   /** Atomic claim: only succeeds while the action is still pending_approval. */
   decideAction(id: string, status: 'approved' | 'rejected', note?: string): Promise<Action | null>;
+  /** Pending approvals created before `cutoff`, oldest first. */
+  listPendingActionsOlderThan(cutoff: Date): Promise<Action[]>;
   /** Undoes a claim whose execution failed before producing a result, so the reviewer can decide again. */
   reopenAction(id: string): Promise<void>;
   setActionResult(id: string, result: unknown): Promise<void>;

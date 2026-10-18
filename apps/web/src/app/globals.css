@@ -57,7 +57,7 @@ h1, h2, h3, p { margin: 0; }
 .chip { display: inline-block; font-size: 11.5px; padding: 1px 8px; border-radius: 99px; background: var(--code); color: var(--muted); font-weight: 600; }
 .chip.warn, .chip.awaiting_approval, .chip.pending_approval { background: var(--warn-soft); color: var(--warn); }
 .chip.completed, .chip.approved { background: var(--accent-soft); color: var(--accent); }
-.chip.failed, .chip.rejected, .chip.step_limit { background: var(--bad-soft); color: var(--bad); }
+.chip.failed, .chip.rejected, .chip.step_limit, .chip.budget_exceeded { background: var(--bad-soft); color: var(--bad); }
 .chip.running { background: var(--code); color: var(--ink); }
 .chip.provider { border: 1px solid var(--line); background: transparent; }
 

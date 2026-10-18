@@ -38,12 +38,16 @@ ALTER TABLE conversations ADD COLUMN IF NOT EXISTS access_token_hash text;
 CREATE TABLE IF NOT EXISTS runs (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   conversation_id uuid NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-  status text NOT NULL CHECK (status IN ('running', 'awaiting_approval', 'completed', 'failed', 'step_limit')),
+  status text NOT NULL,
   model_calls int NOT NULL DEFAULT 0,
   error text,
   created_at timestamptz NOT NULL DEFAULT now(),
   finished_at timestamptz
 );
+-- Re-created on every boot so databases made before a status was added pick it up (inline CHECKs can't be altered).
+ALTER TABLE runs DROP CONSTRAINT IF EXISTS runs_status_check;
+ALTER TABLE runs ADD CONSTRAINT runs_status_check
+  CHECK (status IN ('running', 'awaiting_approval', 'completed', 'failed', 'step_limit', 'budget_exceeded'));
 CREATE INDEX IF NOT EXISTS runs_conversation_idx ON runs (conversation_id);
 
 CREATE TABLE IF NOT EXISTS steps (

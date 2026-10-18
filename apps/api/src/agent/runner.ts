@@ -1,15 +1,14 @@
 import { ConflictError, GuardrailViolation, NotFoundError } from './errors';
-import { systemPrompt } from './prompt';
+import { buildMessages } from './context';
 import { toolByName, toolSpecs, validateToolInput, type ToolContext } from './tools';
 import type {
   Action,
   AgentStore,
-  ChatMessage,
   ChatProvider,
   Conversation,
   Run,
   ShopRepo,
-  Step,
+  NewStep,
   ToolCall,
 } from './types';
 
@@ -19,6 +18,10 @@ export interface RunnerDeps {
   store: AgentStore;
   /** Max model calls per run (default 8). */
   maxSteps?: number;
+  /** Max tokens (input + output) a conversation may use before the agent stops calling the model. Unset = unlimited. */
+  tokenBudget?: number;
+  /** Rough cap on the history sent to the model; older turns are left out (the stored trace is untouched). Unset = all. */
+  maxContextTokens?: number;
 }
 
 type Outcome = { kind: 'result'; result: unknown } | { kind: 'pending'; reasoning: string };
@@ -31,9 +34,13 @@ const guardrailResult = (e: GuardrailViolation) => ({ error: e.message, code: e.
  */
 export class AgentRunner {
   private readonly maxSteps: number;
+  private readonly tokenBudget: number;
+  private readonly maxContextTokens: number;
 
   constructor(private readonly deps: RunnerDeps) {
     this.maxSteps = deps.maxSteps ?? 8;
+    this.tokenBudget = deps.tokenBudget ?? Infinity;
+    this.maxContextTokens = deps.maxContextTokens ?? Infinity;
   }
 
   /** Starts a run for a new user message. Resolves when the run completes or pauses for approval. */
@@ -90,8 +97,23 @@ export class AgentRunner {
     let run = startRun;
     const base = { runId: run.id, conversationId: conv.id };
     try {
+      // History is read once; every step this loop adds is appended here, so model calls never re-query it.
+      const steps = await store.listSteps(conv.id);
+      const addStep = async (step: NewStep) => {
+        const saved = await store.addStep(step);
+        steps.push(saved);
+        return saved;
+      };
       while (run.modelCalls < this.maxSteps) {
-        const messages = await this.buildMessages(conv);
+        if (await this.overBudget(conv)) {
+          await addStep({
+            ...base, role: 'assistant',
+            content: "This conversation has reached its usage limit, so I can't continue here. A human agent will follow up.",
+            result: { error: `Token budget of ${this.tokenBudget} reached`, code: 'TOKEN_BUDGET' },
+          });
+          return store.updateRun(run.id, { status: 'budget_exceeded', error: `Token budget of ${this.tokenBudget} reached` });
+        }
+        const messages = buildMessages(conv, steps, this.maxContextTokens);
         const started = Date.now();
         const completion = await provider.complete(messages, toolSpecs());
         const latencyMs = Date.now() - started;
@@ -99,13 +121,13 @@ export class AgentRunner {
         const usage = { inputTokens: completion.usage?.inputTokens, outputTokens: completion.usage?.outputTokens };
 
         if (completion.toolCalls.length === 0) {
-          await store.addStep({ ...base, role: 'assistant', content: completion.text ?? '', latencyMs, ...usage });
+          await addStep({ ...base, role: 'assistant', content: completion.text ?? '', latencyMs, ...usage });
           return store.updateRun(run.id, { status: 'completed' });
         }
 
         // Persist every call of this turn before executing, so history keeps provider ordering.
         for (const [i, call] of completion.toolCalls.entries()) {
-          await store.addStep({
+          await addStep({
             ...base, role: 'assistant', content: i === 0 ? (completion.text ?? null) : null,
             toolName: call.name, toolArgs: call.args, toolCallId: call.id,
             latencyMs: i === 0 ? latencyMs : null, ...(i === 0 ? usage : {}),
@@ -121,21 +143,21 @@ export class AgentRunner {
               toolArgs: call.args as Record<string, unknown>, toolCallId: call.id, reasoning: outcome.reasoning,
             });
             for (const skipped of completion.toolCalls.slice(i + 1)) {
-              await store.addStep({
+              await addStep({
                 ...base, role: 'tool', toolName: skipped.name, toolCallId: skipped.id,
                 result: { error: 'Skipped: an earlier action in this turn is awaiting human approval.', code: 'SKIPPED' },
               });
             }
             return store.updateRun(run.id, { status: 'awaiting_approval' });
           }
-          await store.addStep({
+          await addStep({
             ...base, role: 'tool', toolName: call.name, toolCallId: call.id,
             result: outcome.result, latencyMs: Date.now() - t0,
           });
         }
       }
 
-      await store.addStep({
+      await addStep({
         ...base, role: 'assistant',
         content: `I couldn't finish this within ${this.maxSteps} steps. A human agent will follow up.`,
         result: { error: `Step limit of ${this.maxSteps} reached`, code: 'STEP_LIMIT' },
@@ -145,6 +167,13 @@ export class AgentRunner {
       await store.updateRun(run.id, { status: 'failed', error: e instanceof Error ? e.message : String(e) });
       throw e;
     }
+  }
+
+  /** A soft cap: checked before each model call, so the call that crosses it still completes. */
+  private async overBudget(conv: Conversation): Promise<boolean> {
+    if (this.tokenBudget === Infinity) return false;
+    const { inputTokens, outputTokens } = await this.deps.store.conversationUsage(conv.id);
+    return inputTokens + outputTokens >= this.tokenBudget;
   }
 
   /** Unknown tool -> invalid args -> guardrails -> (park | execute). Failures become tool results, not exceptions. */
@@ -168,27 +197,5 @@ export class AgentRunner {
       if (e instanceof GuardrailViolation) return { kind: 'result', result: guardrailResult(e) };
       throw e;
     }
-  }
-
-  /** Rebuilds provider messages from persisted steps (so a paused run can resume after a restart). */
-  private async buildMessages(conv: Conversation): Promise<ChatMessage[]> {
-    const steps = await this.deps.store.listSteps(conv.id);
-    const answered = new Set(steps.filter((s) => s.role === 'tool').map((s) => s.toolCallId));
-    const messages: ChatMessage[] = [{ role: 'system', content: systemPrompt(conv) }];
-
-    for (const s of steps as Step[]) {
-      if (s.role === 'user') messages.push({ role: 'user', content: s.content ?? '' });
-      else if (s.role === 'tool') messages.push({ role: 'tool', toolCallId: s.toolCallId!, content: JSON.stringify(s.result) });
-      else if (s.toolName && s.toolCallId) {
-        if (!answered.has(s.toolCallId)) continue; // dangling call from a crashed run: keep history valid
-        const call: ToolCall = { id: s.toolCallId, name: s.toolName, args: s.toolArgs };
-        const prev = messages[messages.length - 1];
-        if (prev.role === 'assistant' && prev.toolCalls) {
-          prev.toolCalls.push(call);
-          prev.content ||= s.content ?? '';
-        } else messages.push({ role: 'assistant', content: s.content ?? '', toolCalls: [call] });
-      } else messages.push({ role: 'assistant', content: s.content ?? '' });
-    }
-    return messages;
   }
 }
