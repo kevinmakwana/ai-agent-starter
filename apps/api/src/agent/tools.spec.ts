@@ -18,6 +18,8 @@ describe('tool input schemas', () => {
     ['list_orders', { customerId: 1 }], // the conversation decides whose orders; the model can't pick
     ['list_orders', 'not an object'],
     ['get_order', { orderId: 0 }],
+    ['get_order', { orderId: 2 ** 31 }], // beyond the database's integer: must not reach a query
+    ['issue_refund', { orderId: 1e12, amount: 5, reason: 'because' }],
     ['create_ticket', { subject: 'x', body: 'ok' }],
     ['create_ticket', { customerId: 1, subject: 'Late parcel', body: 'ok' }],
     ['issue_refund', { orderId: 1, amount: -5, reason: 'because' }],
@@ -27,6 +29,15 @@ describe('tool input schemas', () => {
   ])('rejects invalid arguments: %s %j', (tool, args) => {
     const r = validateToolInput(tool, args);
     expect(r.ok).toBe(false);
+  });
+
+  it('accepts the largest order id the database can hold', () => {
+    expect(validateToolInput('get_order', { orderId: 2 ** 31 - 1 })).toEqual({ ok: true });
+  });
+
+  it('refuses NUL characters but not text that merely looks like an escape of one', () => {
+    expect(validateToolInput('create_ticket', { subject: 'Late parcel', body: 'a\u0000b' }).ok).toBe(false);
+    expect(validateToolInput('create_ticket', { subject: 'Late parcel', body: 'literal \\u0000 text' })).toEqual({ ok: true });
   });
 
   it('reports unknown tools', () => {

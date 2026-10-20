@@ -82,3 +82,14 @@ describe('HTTP hardening config', () => {
     expect(loadRateLimits({ RATE_LIMIT_MESSAGES_PER_MINUTE: '3' })).toEqual({ perMinute: 600, startPerMinute: 10, messagesPerMinute: 3 });
   });
 });
+
+describe('basic numeric config', () => {
+  it('validates the step limit, port and mock delay instead of letting NaN through', () => {
+    expect(loadConfig({ AGENT_MAX_STEPS: '5', API_PORT: '4000', MOCK_DELAY_MS: '0' })).toMatchObject({ maxSteps: 5, port: 4000, mockDelayMs: 0 });
+    expect(() => loadConfig({ AGENT_MAX_STEPS: 'many' })).toThrow('AGENT_MAX_STEPS');
+    expect(() => loadConfig({ AGENT_MAX_STEPS: '0' })).toThrow('AGENT_MAX_STEPS');
+    expect(() => loadConfig({ API_PORT: 'http' })).toThrow('API_PORT');
+    expect(() => loadConfig({ API_PORT: '70000' })).toThrow('API_PORT');
+    expect(() => loadConfig({ MOCK_DELAY_MS: '-1' })).toThrow('MOCK_DELAY_MS');
+  });
+});

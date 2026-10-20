@@ -64,3 +64,10 @@ describe('buildMessages', () => {
     });
   });
 });
+
+describe('buildMessages and blank assistant messages', () => {
+  it('leaves out assistant messages with no text and no tool call, which providers reject', () => {
+    const msgs = buildMessages(conv, [user('hi'), answer(''), user('hello?'), answer('hi there')]);
+    expect(msgs.map((m) => m.role)).toEqual(['system', 'user', 'user', 'assistant']);
+  });
+});

@@ -125,6 +125,7 @@ describe('truncated and declined responses are never executed', () => {
   it.each([
     ['anthropic: tool call cut off by max_tokens', anthropic.toolCall('max_tokens'), anthropic, /cut off/],
     ['anthropic: answer cut off by max_tokens', anthropic.text('Your order is on its wa', 'max_tokens'), anthropic, /cut off/],
+    ['anthropic: tool call cut off by the context window', anthropic.toolCall('model_context_window_exceeded'), anthropic, /cut off/],
     ['anthropic: refusal', anthropic.text('', 'refusal'), anthropic, /declined/],
     ['openai: tool call cut off by length', openai.toolCall('length'), openai, /cut off/],
     ['openai: answer cut off by length', openai.text('Your order is on its wa', 'length'), openai, /cut off/],
@@ -192,5 +193,98 @@ describe('token limits and caching', () => {
       usage: { prompt_tokens: 400, completion_tokens: 6, prompt_tokens_details: { cached_tokens: 128 } },
     }))).complete(messages, tools);
     expect(out.usage).toEqual({ inputTokens: 400, outputTokens: 6, cachedInputTokens: 128 });
+  });
+});
+
+describe.each([anthropic, openai])('$name adapter: unusable responses', (f) => {
+  it('maps a 200 that is not JSON (e.g. a proxy error page) to an upstream error, not a crash', async () => {
+    const fetch = script(new Response('<html>Bad gateway</html>', { status: 200 }));
+    const err = await f.make(fetch).complete(messages, tools).catch((e) => e);
+    expect(err).toBeInstanceOf(UpstreamLlmError);
+    expect(err.message).not.toContain('<html>');
+  });
+
+  it('maps a body that fails mid-read (timeout, reset) to an upstream error', async () => {
+    const broken = new Response(new ReadableStream({ start: (c) => c.error(new Error('socket hang up')) }), { status: 200 });
+    const err = await f.make(script(broken)).complete(messages, tools).catch((e) => e);
+    expect(err).toBeInstanceOf(UpstreamLlmError);
+  });
+
+  it('still reports the HTTP status when an error response body cannot be read', async () => {
+    const broken = new Response(new ReadableStream({ start: (c) => c.error(new Error('reset')) }), { status: 400 });
+    const err = await f.make(script(broken)).complete(messages, tools).catch((e) => e);
+    expect(err).toBeInstanceOf(UpstreamLlmError);
+    expect(err.message).toContain('HTTP 400');
+  });
+});
+
+describe.each([anthropic, openai])('$name adapter: retry edge cases', (f) => {
+  const delays: number[] = [];
+  const sleep = async (ms: number) => { delays.push(ms); };
+  beforeEach(() => { delays.length = 0; });
+
+  it('retries a request timeout (408)', async () => {
+    const out = await f.make(script(res(408), f.ok('ok')), { maxRetries: 1, sleep }).complete(messages, tools);
+    expect(out.text).toBe('ok');
+  });
+
+  it('understands Retry-After as an HTTP date', async () => {
+    const inFiveSeconds = new Date(Date.now() + 5000).toUTCString();
+    await f.make(script(res(429, {}, { 'retry-after': inFiveSeconds }), f.ok()), { maxRetries: 1, sleep }).complete(messages, tools);
+    expect(delays).toHaveLength(1);
+    expect(delays[0]).toBeGreaterThan(3000);
+    expect(delays[0]).toBeLessThanOrEqual(5000);
+  });
+
+  it('understands retry-after-ms and prefers it', async () => {
+    await f.make(script(res(429, {}, { 'retry-after-ms': '250', 'retry-after': '9' }), f.ok()), { maxRetries: 1, sleep }).complete(messages, tools);
+    expect(delays).toEqual([250]);
+  });
+
+  it('falls back to its own backoff when Retry-After is garbage or in the past', async () => {
+    await f.make(script(res(429, {}, { 'retry-after': 'soon' }), res(429, {}, { 'retry-after': 'Wed, 21 Oct 2015 07:28:00 GMT' }), f.ok()),
+      { maxRetries: 2, sleep, random: () => 0.5 }).complete(messages, tools);
+    expect(delays).toEqual([250, 0]); // garbage -> backoff; a date in the past -> retry now
+  });
+
+  it('reports a network failure on every attempt as an upstream error, keeping the cause out of the message', async () => {
+    const err = await f.make(script(new Error('ECONNRESET 10.0.0.5'), new Error('ECONNRESET 10.0.0.5')), { maxRetries: 1, sleep }).complete(messages, tools).catch((e) => e);
+    expect(err).toBeInstanceOf(UpstreamLlmError);
+    expect(err.message).not.toContain('10.0.0.5');
+    expect(err.detail).toContain('10.0.0.5');
+  });
+});
+
+describe.each([anthropic, openai])('$name adapter: odd but valid replies', (f) => {
+  it('returns text-less, tool-less replies as empty (the agent decides what to do)', async () => {
+    const empty = f.name === 'anthropic'
+      ? res(200, { content: [], stop_reason: 'end_turn' })
+      : res(200, { choices: [{ message: { content: null }, finish_reason: 'stop' }] });
+    expect(await f.make(script(empty)).complete(messages, tools)).toMatchObject({ text: undefined, toolCalls: [] });
+  });
+
+  it('rejects a reply with no content or choices', async () => {
+    await expect(f.make(script(res(200, {}))).complete(messages, tools)).rejects.toBeInstanceOf(UpstreamLlmError);
+    await expect(f.make(script(res(200, null))).complete(messages, tools)).rejects.toBeInstanceOf(UpstreamLlmError);
+  });
+});
+
+describe('OpenAI adapter: malformed tool calls', () => {
+  const reply = (call: unknown) => res(200, { choices: [{ message: { content: null, tool_calls: [call] }, finish_reason: 'tool_calls' }] });
+  const make = (r: Response) => openai.make(script(r));
+
+  it('passes unparseable arguments through as a string so validation can refuse them', async () => {
+    const out = await make(reply({ id: 'c', function: { name: 'get_order', arguments: '{"orderId":' } })).complete(messages, tools);
+    expect(out.toolCalls[0].args).toBe('{"orderId":');
+  });
+
+  it('treats missing arguments as an empty object', async () => {
+    const out = await make(reply({ id: 'c', function: { name: 'list_orders' } })).complete(messages, tools);
+    expect(out.toolCalls[0].args).toEqual({});
+  });
+
+  it('survives a tool call with no function at all (the agent reports an unknown tool)', async () => {
+    const out = await make(reply({ id: 'c' })).complete(messages, tools);
+    expect(out.toolCalls).toEqual([{ id: 'c', name: '', args: {} }]);
   });
 });

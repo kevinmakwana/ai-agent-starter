@@ -1,4 +1,5 @@
 import { type CanActivate, type ExecutionContext, Inject, Injectable, UnauthorizedException } from '@nestjs/common';
+import { isUUID } from 'class-validator';
 import type { Request } from 'express';
 import type { AppConfig } from '../config';
 import { PgAgentStore } from '../db/pg-agent.store';
@@ -20,7 +21,7 @@ export class ConversationAccessGuard implements CanActivate {
     if (isReviewer(this.cfg.reviewerApiKey, req.headers.authorization)) return true;
     const token = req.headers[CONVERSATION_TOKEN_HEADER];
     const id = req.params.id;
-    if (typeof token === 'string' && typeof id === 'string' && (await this.store.verifyConversationToken(id, token))) return true;
+    if (typeof token === 'string' && typeof id === 'string' && isUUID(id) && (await this.store.verifyConversationToken(id, token))) return true;
     throw new UnauthorizedException('A valid conversation token or reviewer credentials are required');
   }
 }
