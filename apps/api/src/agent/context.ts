@@ -27,7 +27,7 @@ function toMessages(steps: Step[], answered: Set<string | null>): ChatMessage[] 
         prev.toolCalls.push(call);
         prev.content ||= s.content ?? '';
       } else messages.push({ role: 'assistant', content: s.content ?? '', toolCalls: [call] });
-    } else messages.push({ role: 'assistant', content: s.content ?? '' });
+    } else if (s.content?.trim()) messages.push({ role: 'assistant', content: s.content }); // blank replies are rejected by providers
   }
   return messages;
 }

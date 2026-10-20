@@ -1,6 +1,6 @@
 import { UpstreamLlmError } from '../agent/errors';
 import type { ChatMessage, ChatProvider, Completion, ToolSpec } from '../agent/types';
-import { fetchWithRetry, type RetryOptions } from './retry';
+import { errorDetail, fetchWithRetry, readJson, type RetryOptions } from './retry';
 
 export interface OpenAiOptions extends RetryOptions {
   apiKey: string;
@@ -38,9 +38,9 @@ export class OpenAiProvider implements ChatProvider {
       }),
       this.opts,
     );
-    if (!res.ok) throw new UpstreamLlmError(this.name, `provider returned HTTP ${res.status}`, (await res.text()).slice(0, 500));
+    if (!res.ok) throw new UpstreamLlmError(this.name, `provider returned HTTP ${res.status}`, await errorDetail(res));
 
-    const data: any = await res.json();
+    const data = await readJson(this.name, res);
     const msg = data?.choices?.[0]?.message;
     if (!msg) throw new UpstreamLlmError(this.name, 'response contained no message');
     // A cut-off tool call has incomplete arguments: never hand it to the agent to execute.
@@ -51,7 +51,7 @@ export class OpenAiProvider implements ChatProvider {
     if (finish === 'content_filter') throw new UpstreamLlmError(this.name, 'the model declined to respond', 'finish_reason=content_filter');
     return {
       text: msg.content ?? undefined,
-      toolCalls: (msg.tool_calls ?? []).map((c: any) => ({ id: c.id, name: c.function.name, args: parseArgs(c.function.arguments) })),
+      toolCalls: (msg.tool_calls ?? []).map((c: any) => ({ id: c.id, name: String(c.function?.name ?? ''), args: parseArgs(c.function?.arguments) })),
       usage: data.usage
         ? {
             inputTokens: data.usage.prompt_tokens,
@@ -76,6 +76,6 @@ function toOpenAi(m: ChatMessage) {
 }
 
 /** Invalid JSON is passed through as a string so schema validation rejects it with a clear message. */
-function parseArgs(raw: string): unknown {
+function parseArgs(raw: string | undefined): unknown {
   try { return JSON.parse(raw || '{}'); } catch { return raw; }
 }

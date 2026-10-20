@@ -229,6 +229,55 @@ maybe('approval flow (e2e, real Postgres)', () => {
       await http().post(`/conversations/${stale}/messages`).send({ content: 'show my recent orders' }).expect(201); // no longer blocked
     });
 
+    it('finishes a decision whose process died after claiming it, without paying twice', async () => {
+      const store = app.get(PgAgentStore);
+      const expiry = app.get(ApprovalExpiry);
+      const id = await newConversation(1);
+      await http().post(`/conversations/${id}/messages`).send({ content: 'refund order #1' }).expect(201);
+      const [approval] = (await http().get('/approvals?status=pending')).body;
+
+      // the crash: claimed and even refunded, but no result, trace step or resume
+      await store.decideAction(approval.id, 'approved', 'ok');
+      await app.get(PgShopRepo).createRefund({ customerId: 1, orderId: 1, amount: 18.75, reason: 'damaged', actionId: approval.id });
+      expect(await expiry.recoverStranded()).toEqual({ recovered: 0, failed: 0 }); // too fresh: it may still be running
+
+      await pool.query("UPDATE actions SET decided_at = now() - interval '10 minutes' WHERE id = $1", [approval.id]);
+      expect(await expiry.recoverStranded()).toEqual({ recovered: 1, failed: 0 });
+
+      const { rows } = await pool.query('SELECT count(*)::int AS n FROM refunds WHERE action_id = $1', [approval.id]);
+      expect(rows[0].n).toBe(1);
+      expect((await store.getAction(approval.id))!.result).toMatchObject({ status: 'refunded' });
+      const trace = (await http().get(`/conversations/${id}`)).body;
+      expect(trace.runs.at(-1).status).toBe('completed');
+      await http().post(`/conversations/${id}/messages`).send({ content: 'thanks' }).expect(201); // conversation is free again
+      expect(await expiry.recoverStranded()).toEqual({ recovered: 0, failed: 0 });
+    });
+
+    it('does not recover a decision whose run is no longer waiting, or one that is still pending', async () => {
+      const store = app.get(PgAgentStore);
+      const expiry = app.get(ApprovalExpiry);
+      const id = await newConversation(1);
+      await http().post(`/conversations/${id}/messages`).send({ content: 'refund order #1' }).expect(201);
+      const [approval] = (await http().get('/approvals?status=pending')).body;
+      expect(await expiry.recoverStranded()).toEqual({ recovered: 0, failed: 0 }); // pending is not stranded
+
+      await store.decideAction(approval.id, 'approved');
+      await pool.query("UPDATE actions SET decided_at = now() - interval '10 minutes' WHERE id = $1", [approval.id]);
+      await pool.query("UPDATE runs SET status = 'failed' WHERE conversation_id = $1", [id]);
+      expect(await expiry.recoverStranded()).toEqual({ recovered: 0, failed: 0 });
+      // filtered in SQL too, so rows that can never be recovered cannot fill the page and starve real ones
+      expect(await store.listStrandedActions(new Date())).toEqual([]);
+      const { rows } = await pool.query('SELECT count(*)::int AS n FROM refunds WHERE action_id = $1', [approval.id]);
+      expect(rows[0].n).toBe(0);
+    });
+
+    it('trims the message before it is stored and sent to the model', async () => {
+      const id = await newConversation(1);
+      await http().post(`/conversations/${id}/messages`).send({ content: '  hello  ' }).expect(201);
+      const { rows } = await pool.query("SELECT content FROM steps WHERE conversation_id = $1 AND role = 'user'", [id]);
+      expect(rows).toEqual([{ content: 'hello' }]);
+    });
+
     it('starts a conversation by customer email (case-insensitive)', async () => {
       const res = await http().post('/conversations').send({ email: 'AVA.BROOKS@example.com' }).expect(201);
       expect(res.body).toMatchObject({ customerId: 1, accessToken: expect.any(String) });
@@ -243,6 +292,11 @@ maybe('approval flow (e2e, real Postgres)', () => {
       await http().post('/conversations').send({ customerId: 999 }).expect(404);
       const id = await newConversation(1);
       await http().post(`/conversations/${id}/messages`).send({ content: '' }).expect(400);
+      await http().post(`/conversations/${id}/messages`).send({ content: '   \n\t ' }).expect(400); // nothing for the model to read
+      await http().post(`/conversations/${id}/messages`).send({ content: 'a'.repeat(2001) }).expect(400);
+      await http().post(`/conversations/${id}/messages`).send({ content: 'null byte \u0000 inside' }).expect(400); // Postgres text cannot hold NUL
+      await http().post('/conversations').send({ customerId: 1, title: 'bad \u0000 title' }).expect(400);
+      await http().post('/conversations').send({ customerId: 2 ** 31 }).expect(400); // beyond the integer column
       await http().post(`/conversations/${id}/messages`).send({ content: 'hi', role: 'system' }).expect(400);
       await http().get('/approvals?status=bogus').expect(400);
       await http().post('/approvals/not-a-uuid').send({ decision: 'approve' }).expect(400);
@@ -280,6 +334,8 @@ maybe('approval flow (e2e, real Postgres)', () => {
       await http().get(`/conversations/${mine.id}`).set(other.token).expect(401); // someone else's token
       await http().post(`/conversations/${mine.id}/messages`).set(other.token).send({ content: 'hi' }).expect(401);
       await http().get('/conversations/00000000-0000-4000-8000-000000000000').set(mine.token).expect(401); // no id probing
+      await http().get('/conversations/not-a-uuid').set(mine.token).expect(401); // a malformed id is just another wrong id
+      await http().post('/conversations/not-a-uuid/messages').set(mine.token).send({ content: 'hi' }).expect(401);
 
       await http().get(`/conversations/${mine.id}`).set(mine.token).expect(200);
       await http().post(`/conversations/${mine.id}/messages`).set(mine.token).send({ content: 'refund order #1' }).expect(201);

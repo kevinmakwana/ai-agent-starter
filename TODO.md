@@ -22,6 +22,17 @@
 - [x] 3.5 Scheduled/manual CI job for `smoke:llm` with repo secrets.
 - [ ] 3.6 Verify against a live key that the Anthropic adapter's history is accepted when thinking is on (Sonnet 5.5 thinks by default): it drops `thinking` blocks when replaying a tool-call turn. If the API rejects that, preserve the blocks within the current turn only (older turns are trimmed by the context cap, which would break their signatures).
 
+## Audit of Phases 1-3 (edge cases found after the phases shipped)
+- [x] A.1 Failing to save the first user message no longer leaves the run `running` (it blocked the conversation for 10 minutes).
+- [x] A.2 `decide()` failures after the claim: reopen if the result was not saved, fail the run if the trace could not be, answer with `UNKNOWN_TOOL` for a retired tool.
+- [x] A.3 Crash recovery: finish decisions claimed by a process that died (idempotent refund, runs only while the run still waits).
+- [x] A.4 Order ids bounded to the integer range; NUL rejected in messages, titles, notes and model-supplied tool arguments; whitespace-only messages rejected and messages trimmed.
+- [x] A.5 Non-UUID conversation id with a token header is `401`, not a database error.
+- [x] A.6 `AGENT_MAX_STEPS`, `API_PORT`, `MOCK_DELAY_MS` validated (NaN used to skip the agent loop silently).
+- [x] A.7 Providers: non-JSON / truncated bodies and unreadable error bodies become `UpstreamLlmError`; `model_context_window_exceeded` guarded; malformed OpenAI tool calls survive.
+- [x] A.8 Empty model replies are never stored as blank messages (Anthropic rejects them on the next call); their tokens still count toward the budget; blank steps are hidden in the customer chat.
+- [x] A.9 Approval sweep never overlaps itself; TTL wording is readable for short TTLs.
+
 ## Phase 4: Features
 - [ ] 4.1 SSE streaming of runs (API + `EventSource` in the web app).
 - [ ] 4.2 Threshold-based approval policy per tool.

@@ -185,6 +185,16 @@ export class PgAgentStore implements AgentStore {
     return rows.map((r) => camel<Action>(r));
   }
 
+  async listStrandedActions(decidedBefore: Date): Promise<Action[]> {
+    const { rows } = await this.pool.query(
+      `SELECT a.* FROM actions a JOIN runs r ON r.id = a.run_id
+       WHERE a.status <> 'pending_approval' AND a.result IS NULL AND a.decided_at < $1 AND r.status = 'awaiting_approval'
+       ORDER BY a.decided_at LIMIT 100`,
+      [decidedBefore],
+    );
+    return rows.map((r) => camel<Action>(r));
+  }
+
   async reopenAction(id: string): Promise<void> {
     await this.pool.query(
       `UPDATE actions SET status = 'pending_approval', decision_note = NULL, decided_at = NULL

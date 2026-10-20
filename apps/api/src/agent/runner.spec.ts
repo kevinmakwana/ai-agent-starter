@@ -1,6 +1,6 @@
 import { MemoryShop, MemoryStore } from '../../test/fakes';
 import { MockProvider } from '../providers/mock.provider';
-import { ConflictError } from './errors';
+import { ConflictError, UpstreamLlmError } from './errors';
 import { promptVersion } from './prompt';
 import { AgentRunner } from './runner';
 import type { ChatMessage, ChatProvider, Completion } from './types';
@@ -30,7 +30,7 @@ describe('agent loop with the mock provider', () => {
     const { run, action: decided } = await runner.decide(action.id, 'approve', 'Looks legitimate');
     expect(decided.status).toBe('approved');
     expect(run.status).toBe('completed');
-    expect(shop.refunds).toEqual([{ id: 1, orderId: 1, amount: 50, reason: expect.stringContaining('damaged') }]);
+    expect(shop.refunds).toEqual([{ id: 1, orderId: 1, amount: 50, reason: expect.stringContaining('damaged'), actionId: action.id }]); // tied to its approval
     expect(store.steps.at(-1)).toMatchObject({ role: 'assistant', content: expect.stringContaining('approved and issued') });
     expect(store.steps.every((s) => s.latencyMs === null || s.latencyMs >= 0)).toBe(true);
   });
@@ -254,6 +254,33 @@ describe('token budget', () => {
     expect(store.steps.at(-1)).toMatchObject({ inputTokens: 100, outputTokens: 5, cachedInputTokens: 80 });
   });
 
+  it('still carries out a reviewer decision when the budget ran out while it waited, then stops', async () => {
+    const mock = new MockProvider();
+    const metered: ChatProvider = {
+      name: 'metered',
+      complete: async (messages) => ({ ...(await mock.complete(messages)), usage: { inputTokens: 60, outputTokens: 40 } }),
+    };
+    const { runner, store, shop, conv } = setup(metered, 8, 150);
+    expect((await runner.handleUserMessage(conv, 'refund order #1')).status).toBe('awaiting_approval'); // 200 tokens spent
+    const [action] = [...store.actions.values()];
+
+    const { run } = await runner.decide(action.id, 'approve');
+
+    expect(shop.refunds).toHaveLength(1); // the approved refund is not lost to the cap
+    expect(store.actions.get(action.id)!.result).toMatchObject({ status: 'refunded' });
+    expect(run.status).toBe('budget_exceeded');
+    expect(store.steps.at(-1)?.content).toContain('usage limit');
+  });
+
+  it('counts the usage of an empty reply that was refused, so it cannot be used to dodge the budget', async () => {
+    const empty: ChatProvider = { name: 'empty', complete: async () => ({ text: '', toolCalls: [], usage: { inputTokens: 100, outputTokens: 0 } }) };
+    const { runner, store, conv } = setup(empty, 8, 150);
+    await runner.handleUserMessage(conv, 'a').catch(() => undefined);
+    await runner.handleUserMessage(conv, 'b').catch(() => undefined);
+    expect(await store.conversationUsage(conv.id)).toEqual({ inputTokens: 200, outputTokens: 0 });
+    expect((await runner.handleUserMessage(conv, 'c')).status).toBe('budget_exceeded');
+  });
+
   it('has no limit unless a budget is configured', async () => {
     const { provider } = costly();
     const { runner, conv } = setup(provider, 4);
@@ -291,5 +318,95 @@ describe('conversation context', () => {
     expect(lastCall.filter((m) => m.role === 'user').map((m) => m.content.split(' ')[0])).toEqual(['two', 'three']);
     expect(lastCall[0].content).toContain('1 earlier message was left out');
     expect(store.steps.filter((x) => x.role === 'user')).toHaveLength(3); // nothing deleted from the trace
+  });
+});
+
+describe('failures around a run', () => {
+  const scripted = (calls: Completion[]): ChatProvider => {
+    let i = 0;
+    return { name: 'scripted', complete: async () => calls[Math.min(i++, calls.length - 1)] };
+  };
+
+  it('does not leave the conversation blocked when the first user message cannot be saved', async () => {
+    const { runner, store, conv } = setup();
+    const addStep = store.addStep.bind(store);
+    store.addStep = async () => { throw new Error('db down'); };
+    await expect(runner.handleUserMessage(conv, 'hi')).rejects.toThrow('db down');
+    expect([...store.runs.values()][0]).toMatchObject({ status: 'failed', error: 'db down' });
+
+    store.addStep = addStep; // the database recovers: the customer can simply try again
+    expect((await runner.handleUserMessage(conv, 'hi again')).status).toBe('completed');
+  });
+
+  it('treats an empty model reply as a failed call instead of storing a blank message', async () => {
+    const { runner, store, conv } = setup(scripted([{ text: '  ', toolCalls: [] }]));
+    await expect(runner.handleUserMessage(conv, 'hi')).rejects.toBeInstanceOf(UpstreamLlmError);
+    expect([...store.runs.values()][0].status).toBe('failed');
+    // the billed call stays visible in the trace, flagged, but is never replayed to the model
+    expect(store.steps.filter((s) => s.role === 'assistant')).toEqual([
+      expect.objectContaining({ content: '', result: expect.objectContaining({ code: 'EMPTY_RESPONSE' }) }),
+    ]);
+  });
+
+  describe('when an approval cannot be completed after it was claimed', () => {
+    const park = async () => {
+      const ctx = setup();
+      await ctx.runner.handleUserMessage(ctx.conv, 'refund order #1');
+      const [action] = [...ctx.store.actions.values()];
+      return { ...ctx, action };
+    };
+
+    it('reopens it if saving the result fails, so the reviewer can retry (the refund is idempotent per approval)', async () => {
+      const { runner, store, action } = await park();
+      const setActionResult = store.setActionResult.bind(store);
+      store.setActionResult = async () => { throw new Error('db down'); };
+      await expect(runner.decide(action.id, 'approve')).rejects.toThrow('db down');
+      expect(store.actions.get(action.id)).toMatchObject({ status: 'pending_approval', result: null });
+      expect([...store.runs.values()][0].status).toBe('awaiting_approval');
+
+      store.setActionResult = setActionResult;
+      expect((await runner.decide(action.id, 'approve')).run.status).toBe('completed');
+    });
+
+    it('fails the run, rather than leaving it parked forever, once the result is saved but the trace cannot be', async () => {
+      const { runner, store, action, conv } = await park();
+      const addStep = store.addStep.bind(store);
+      store.addStep = async (s) => { if (s.role === 'tool' && s.toolName === 'issue_refund') throw new Error('db down'); return addStep(s); };
+      await expect(runner.decide(action.id, 'approve')).rejects.toThrow('db down');
+      expect(store.actions.get(action.id)?.result).not.toBeNull(); // the decision stands; it is not re-executed
+      expect([...store.runs.values()][0].status).toBe('failed');
+
+      store.addStep = addStep;
+      expect((await runner.handleUserMessage(conv, 'hello again')).status).toBe('completed'); // not blocked
+    });
+
+    it('answers with a tool error instead of crashing when the parked tool no longer exists', async () => {
+      const { runner, store, conv } = setup();
+      const run = await store.createRun(conv.id);
+      await store.updateRun(run.id, { status: 'awaiting_approval' });
+      const action = await store.createAction({
+        runId: run.id, conversationId: conv.id, toolName: 'retired_tool', toolArgs: {}, toolCallId: 't1', reasoning: '',
+      });
+      const out = await runner.decide(action.id, 'approve');
+      expect(out.action.result).toMatchObject({ code: 'UNKNOWN_TOOL' });
+      expect(out.run.status).toBe('completed');
+    });
+  });
+});
+
+describe('tool arguments the database cannot store', () => {
+  it('rejects a NUL character in model-supplied text as invalid arguments instead of failing the run', async () => {
+    let i = 0;
+    const provider: ChatProvider = {
+      name: 'scripted',
+      complete: async () => [
+        { toolCalls: [{ id: 'a', name: 'create_ticket', args: { subject: 'Late parcel', body: 'bad \u0000 byte' } }] },
+        { text: 'done', toolCalls: [] },
+      ][i++],
+    };
+    const { runner, store, conv, shop } = setup(provider);
+    expect((await runner.handleUserMessage(conv, 'open a ticket')).status).toBe('completed');
+    expect(store.steps.find((x) => x.role === 'tool')?.result).toMatchObject({ code: 'INVALID_ARGUMENTS' });
+    expect(shop.tickets).toHaveLength(0);
   });
 });

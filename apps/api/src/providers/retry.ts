@@ -59,3 +59,21 @@ export async function fetchWithRetry(
     await sleep(hint ?? backoff(attempt));
   }
 }
+
+/** The body of a successful response as JSON; a non-JSON page or a body cut off mid-read is an upstream failure, not a crash. */
+export async function readJson(provider: string, res: Response): Promise<any> {
+  try {
+    return await res.json();
+  } catch (e) {
+    throw new UpstreamLlmError(provider, 'the response could not be read as JSON', e instanceof Error ? e.message : String(e));
+  }
+}
+
+/** First part of an error body for server logs; never throws, since the status code is what matters. */
+export async function errorDetail(res: Response): Promise<string> {
+  try {
+    return (await res.text()).slice(0, 500);
+  } catch {
+    return '';
+  }
+}

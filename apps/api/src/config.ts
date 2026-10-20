@@ -27,6 +27,12 @@ function positiveInt(env: NodeJS.ProcessEnv, name: string, fallback: number): nu
   return n;
 }
 
+function portNumber(env: NodeJS.ProcessEnv, name: string, fallback: number): number {
+  const n = positiveInt(env, name, fallback);
+  if (n > 65535) throw new Error(`${name} must be a port between 1 and 65535 (got "${env[name]}")`);
+  return n;
+}
+
 function nonNegativeInt(env: NodeJS.ProcessEnv, name: string, fallback: number): number {
   const raw = env[name];
   if (raw === undefined || raw === '') return fallback;
@@ -98,9 +104,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const pass = env.POSTGRES_PASSWORD || 'postgres';
   const db = env.POSTGRES_DB || 'aiagent';
   const cfg: AppConfig = {
-    port: Number(env.API_PORT || 3001),
+    port: portNumber(env, 'API_PORT', 3001),
     databaseUrl: env.DATABASE_URL || `postgres://${user}:${pass}@localhost:${env.DB_PORT || 5432}/${db}`,
-    maxSteps: Number(env.AGENT_MAX_STEPS || 8),
+    maxSteps: positiveInt(env, 'AGENT_MAX_STEPS', 8),
     reviewerApiKey: env.REVIEWER_API_KEY || '',
     corsOrigins: parseCorsOrigins(env.CORS_ORIGINS),
     trustProxy: parseTrustProxy(env.TRUST_PROXY),
@@ -111,7 +117,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     llmMaxRetries: nonNegativeInt(env, 'LLM_MAX_RETRIES', 2),
     llmMaxTokens: env.LLM_MAX_TOKENS ? positiveInt(env, 'LLM_MAX_TOKENS', 0) : undefined,
     provider,
-    mockDelayMs: Number(env.MOCK_DELAY_MS ?? 150),
+    mockDelayMs: nonNegativeInt(env, 'MOCK_DELAY_MS', 150),
     openai: {
       apiKey: env.OPENAI_API_KEY || '',
       model: env.OPENAI_MODEL || 'gpt-4o-mini',

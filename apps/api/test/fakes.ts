@@ -17,7 +17,7 @@ export const ORDERS: Order[] = [
 ];
 
 export class MemoryShop implements ShopRepo {
-  refunds: { id: number; orderId: number; amount: number; reason: string }[] = [];
+  refunds: { id: number; orderId: number; amount: number; reason: string; actionId?: string }[] = [];
   tickets: Ticket[] = [];
 
   async getCustomer(id: number) { return CUSTOMERS.find((c) => c.id === id) ?? null; }
@@ -31,13 +31,15 @@ export class MemoryShop implements ShopRepo {
     this.tickets.push(t);
     return t;
   }
-  async createRefund(input: { customerId: number; orderId: number; amount: number; reason: string }) {
+  async createRefund(input: { customerId: number; orderId: number; amount: number; reason: string; actionId?: string }) {
     const order = await this.getOrder(input.orderId);
     if (!order) throw new GuardrailViolation('NOT_FOUND', 'no such order');
     assertSameCustomer(input.customerId, order.customerId, `Order #${order.id}`);
+    const done = input.actionId ? this.refunds.find((r) => r.actionId === input.actionId) : undefined;
+    if (done) return { refundId: done.id, refundedTotal: await this.totalRefunded(order.id) }; // replay of an approval
     const prior = await this.totalRefunded(order.id);
     assertRefundable({ amount: input.amount, orderTotal: order.total, priorRefunded: prior, status: order.status });
-    const refund = { id: this.refunds.length + 1, orderId: order.id, amount: input.amount, reason: input.reason };
+    const refund = { id: this.refunds.length + 1, orderId: order.id, amount: input.amount, reason: input.reason, actionId: input.actionId };
     this.refunds.push(refund);
     return { refundId: refund.id, refundedTotal: prior + input.amount };
   }
@@ -103,12 +105,18 @@ export class MemoryStore implements AgentStore {
   async decideAction(id: string, status: 'approved' | 'rejected', note?: string) {
     const a = this.actions.get(id);
     if (!a || a.status !== 'pending_approval') return null;
-    Object.assign(a, { status, decisionNote: note ?? null, decidedAt: 'now' });
+    Object.assign(a, { status, decisionNote: note ?? null, decidedAt: new Date().toISOString() });
     return { ...a };
   }
   async listPendingActionsOlderThan(cutoff: Date) {
     return [...this.actions.values()]
       .filter((a) => a.status === 'pending_approval' && Date.parse(a.createdAt) < cutoff.getTime())
+      .map((a) => ({ ...a }));
+  }
+  async listStrandedActions(decidedBefore: Date) {
+    return [...this.actions.values()]
+      .filter((a) => a.status !== 'pending_approval' && a.result === null && Date.parse(a.decidedAt!) < decidedBefore.getTime()
+        && this.runs.get(a.runId)?.status === 'awaiting_approval')
       .map((a) => ({ ...a }));
   }
   async reopenAction(id: string) {

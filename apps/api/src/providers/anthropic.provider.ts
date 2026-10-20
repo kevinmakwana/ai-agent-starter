@@ -1,6 +1,6 @@
 import { UpstreamLlmError } from '../agent/errors';
 import type { ChatMessage, ChatProvider, Completion, ToolSpec } from '../agent/types';
-import { fetchWithRetry, type RetryOptions } from './retry';
+import { errorDetail, fetchWithRetry, readJson, type RetryOptions } from './retry';
 
 export interface AnthropicOptions extends RetryOptions {
   apiKey: string;
@@ -42,13 +42,16 @@ export class AnthropicProvider implements ChatProvider {
       }),
       this.opts,
     );
-    if (!res.ok) throw new UpstreamLlmError(this.name, `provider returned HTTP ${res.status}`, (await res.text()).slice(0, 500));
+    if (!res.ok) throw new UpstreamLlmError(this.name, `provider returned HTTP ${res.status}`, await errorDetail(res));
 
-    const data: any = await res.json();
+    const data = await readJson(this.name, res);
     if (!Array.isArray(data?.content)) throw new UpstreamLlmError(this.name, 'response contained no content');
     // A cut-off tool_use has incomplete input: never hand it to the agent to execute.
     if (data.stop_reason === 'max_tokens') {
       throw new UpstreamLlmError(this.name, 'the response was cut off at the token limit', 'stop_reason=max_tokens; raise LLM_MAX_TOKENS');
+    }
+    if (data.stop_reason === 'model_context_window_exceeded') {
+      throw new UpstreamLlmError(this.name, 'the response was cut off at the context window', 'stop_reason=model_context_window_exceeded; lower CONTEXT_MAX_TOKENS');
     }
     if (data.stop_reason === 'refusal') {
       throw new UpstreamLlmError(this.name, 'the model declined to respond', `stop_reason=refusal ${JSON.stringify(data.stop_details ?? {})}`);

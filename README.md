@@ -119,10 +119,10 @@ One root `.env` (see [.env.example](.env.example)); everything is optional.
 | `DB_PORT` | `5432` | Host port for the Postgres container |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | `postgres` / `postgres` / `aiagent` | Database credentials |
 | `DATABASE_URL` | built from the above | Full connection string override |
-| `API_PORT` | `3001` | NestJS port |
+| `API_PORT` | `3001` | NestJS port (1-65535) |
 | `API_URL` | `http://localhost:3001` | Where Next.js proxies `/api/*` |
 | `REVIEWER_API_KEY` | _(unset)_ | If set, reviewer routes require `Authorization: Bearer <key>` and conversations require their access token; unset = open demo mode |
-| `AGENT_MAX_STEPS` | `8` | Max model calls per run |
+| `AGENT_MAX_STEPS` | `8` | Max model calls per run (positive integer; invalid values stop the API at startup) |
 | `CONVERSATION_TOKEN_BUDGET` | `200000` | Max tokens (input + output) per conversation; after that the agent stops calling the model and the run ends `budget_exceeded`. A soft cap: the call that crosses it still completes |
 | `CONTEXT_MAX_TOKENS` | `8000` | Rough cap on the history sent per model call. Whole old turns are left out (the model is told); the stored trace is never trimmed |
 | `APPROVAL_TTL_MINUTES` | `1440` | Pending approvals older than this are auto-rejected and the agent tells the customer. `0` = never |
@@ -166,6 +166,9 @@ This is a **starter, not a production service**. What is and isn't protected:
 - **Client identity behind proxies.** Rate limits key on the client address. Without `TRUST_PROXY` that is the socket peer, so behind the bundled Next.js proxy every customer shares one bucket (fine for a demo, too coarse for production). Set `TRUST_PROXY=1` only when a trusted load balancer in front sets `X-Forwarded-For`; if the proxy is directly exposed, clients can spoof the header.
 - **Cost controls.** Each conversation has a token budget, the history sent to the model is capped, and `GET /conversations/:id` reports `usage` per run and per conversation. Failed runs show customers a generic error; reviewers see the real one.
 - **Approvals expire.** Pending approvals are auto-rejected after `APPROVAL_TTL_MINUTES`. The sweep runs in-process every minute, so it assumes a single API instance.
+- **Crash recovery.** If the process dies after a reviewer's decision is claimed but before it is carried out, the same minute-by-minute pass finishes it once the claim is five minutes old (even with expiry disabled). Refunds are idempotent per approval, so a refund that had already committed is never paid twice.
+- **Input limits.** Messages are trimmed, must be 1-2000 characters, and may not contain NUL (Postgres text cannot hold it); tool ids are bounded to the database's integer range. Bad values are a `400` at the edge instead of a failed run.
+- **Provider replies.** A body that is not JSON, one cut off mid-read, or an empty model reply becomes a `502` and a failed run (an empty reply is kept in the trace, flagged `EMPTY_RESPONSE`, with its tokens counted, but never replayed to the model).
 
 ## Next steps
 

@@ -136,6 +136,8 @@ export interface AgentStore {
   decideAction(id: string, status: 'approved' | 'rejected', note?: string): Promise<Action | null>;
   /** Pending approvals created before `cutoff`, oldest first. */
   listPendingActionsOlderThan(cutoff: Date): Promise<Action[]>;
+  /** Decided more than a moment ago, yet never completed (no result) while its run still waits: the process died mid-decision. */
+  listStrandedActions(decidedBefore: Date): Promise<Action[]>;
   /** Undoes a claim whose execution failed before producing a result, so the reviewer can decide again. */
   reopenAction(id: string): Promise<void>;
   setActionResult(id: string, result: unknown): Promise<void>;

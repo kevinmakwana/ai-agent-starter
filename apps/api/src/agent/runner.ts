@@ -1,4 +1,4 @@
-import { ConflictError, GuardrailViolation, NotFoundError } from './errors';
+import { ConflictError, GuardrailViolation, NotFoundError, UpstreamLlmError } from './errors';
 import { buildMessages } from './context';
 import { promptVersion } from './prompt';
 import { toolByName, toolSpecs, validateToolInput, type ToolContext } from './tools';
@@ -52,7 +52,12 @@ export class AgentRunner {
       model: this.deps.provider.model ?? null,
       promptVersion: promptVersion(),
     });
-    await store.addStep({ runId: run.id, conversationId: conv.id, role: 'user', content });
+    try {
+      await store.addStep({ runId: run.id, conversationId: conv.id, role: 'user', content });
+    } catch (e) {
+      await this.fail(run, e); // otherwise the run would block this conversation until it went stale
+      throw e;
+    }
     return this.loop(run, conv);
   }
 
@@ -63,20 +68,43 @@ export class AgentRunner {
     const action = await store.decideAction(actionId, decision === 'approve' ? 'approved' : 'rejected', note);
     if (!action) throw new ConflictError('This approval has already been decided');
 
+    return this.complete(action, decision, note);
+  }
+
+  /**
+   * Finishes a decision whose claim succeeded but whose execution never completed because the process died.
+   * Safe to repeat: refunds are idempotent per approval, and an action with a result is refused.
+   */
+  async recover(actionId: string): Promise<{ action: Action; run: Run }> {
+    const action = await this.deps.store.getAction(actionId);
+    if (!action) throw new NotFoundError(`Approval ${actionId} not found`);
+    if (action.status === 'pending_approval' || action.result !== null) throw new ConflictError('This approval is not stranded');
+    if ((await this.deps.store.getRun(action.runId))?.status !== 'awaiting_approval') throw new ConflictError('This run is no longer waiting');
+    return this.complete(action, action.status === 'approved' ? 'approve' : 'reject', action.decisionNote ?? undefined);
+  }
+
+  /** Everything after the claim: execute (if approved), record the result, resume the parked run. */
+  private async complete(action: Action, decision: 'approve' | 'reject', note?: string): Promise<{ action: Action; run: Run }> {
+    const { store } = this.deps;
     const [run, conv] = await Promise.all([store.getRun(action.runId), store.getConversation(action.conversationId)]);
     if (!run || !conv) throw new NotFoundError('Run or conversation no longer exists');
 
     const started = Date.now();
     let result: unknown;
     if (decision === 'approve') {
-      try {
-        result = await toolByName(action.toolName)!.execute(this.ctx(conv), { ...action.toolArgs, actionId: action.id });
-      } catch (e) {
-        if (!(e instanceof GuardrailViolation)) {
-          await store.reopenAction(action.id); // infrastructure failure: let the reviewer try again
-          throw e;
+      const tool = toolByName(action.toolName);
+      if (!tool) {
+        result = { error: `Unknown tool "${action.toolName}"`, code: 'UNKNOWN_TOOL' }; // e.g. removed since it was parked
+      } else {
+        try {
+          result = await tool.execute(this.ctx(conv), { ...action.toolArgs, actionId: action.id });
+        } catch (e) {
+          if (!(e instanceof GuardrailViolation)) {
+            await store.reopenAction(action.id); // infrastructure failure: let the reviewer try again
+            throw e;
+          }
+          result = guardrailResult(e); // e.g. another refund landed while this one waited
         }
-        result = guardrailResult(e); // e.g. another refund landed while this one waited
       }
     } else {
       result = {
@@ -84,13 +112,31 @@ export class AgentRunner {
         message: `A human reviewer rejected this action${note ? `: ${note}` : ''}. Do not retry it; tell the customer.`,
       };
     }
-    await store.setActionResult(action.id, result);
-    await store.addStep({
-      runId: run.id, conversationId: conv.id, role: 'tool', toolName: action.toolName,
-      toolCallId: action.toolCallId, result, latencyMs: Date.now() - started,
-    });
-    const resumed = await store.updateRun(run.id, { status: 'running' });
+    try {
+      await store.setActionResult(action.id, result);
+    } catch (e) {
+      await store.reopenAction(action.id); // nothing recorded yet; a retry replays the (idempotent) tool call
+      throw e;
+    }
+    let resumed: Run;
+    try {
+      await store.addStep({
+        runId: run.id, conversationId: conv.id, role: 'tool', toolName: action.toolName,
+        toolCallId: action.toolCallId, result, latencyMs: Date.now() - started,
+      });
+      resumed = await store.updateRun(run.id, { status: 'running' });
+    } catch (e) {
+      await this.fail(run, e); // the decision stands and is not re-executed; do not leave the run parked forever
+      throw e;
+    }
     return { action: (await store.getAction(action.id))!, run: await this.loop(resumed, conv) };
+  }
+
+  /** Best effort: the original error is what the caller needs to see. */
+  private async fail(run: Run, e: unknown): Promise<void> {
+    await this.deps.store
+      .updateRun(run.id, { status: 'failed', error: e instanceof Error ? e.message : String(e) })
+      .catch(() => undefined);
   }
 
   private ctx(conv: Conversation): ToolContext {
@@ -128,6 +174,12 @@ export class AgentRunner {
           outputTokens: completion.usage?.outputTokens,
           cachedInputTokens: completion.usage?.cachedInputTokens,
         };
+
+        if (completion.toolCalls.length === 0 && !completion.text?.trim()) {
+          // Keep the billed tokens in the trace, but never store a blank reply: providers reject it on the next call.
+          await addStep({ ...base, role: 'assistant', content: '', result: { error: 'Empty model response', code: 'EMPTY_RESPONSE' }, latencyMs, ...usage });
+          throw new UpstreamLlmError(provider.name, 'the model returned an empty response');
+        }
 
         if (completion.toolCalls.length === 0) {
           await addStep({ ...base, role: 'assistant', content: completion.text ?? '', latencyMs, ...usage });
@@ -173,7 +225,7 @@ export class AgentRunner {
       });
       return store.updateRun(run.id, { status: 'step_limit', error: `Step limit of ${this.maxSteps} reached` });
     } catch (e) {
-      await store.updateRun(run.id, { status: 'failed', error: e instanceof Error ? e.message : String(e) });
+      await this.fail(run, e);
       throw e;
     }
   }

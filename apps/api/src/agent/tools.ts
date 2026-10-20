@@ -20,7 +20,8 @@ export interface ToolDef {
   execute: (ctx: ToolContext, args: any) => Promise<unknown>;
 }
 
-const id = { type: 'integer', minimum: 1 } as const;
+/** Bounded by the database's integer column: a larger id must fail validation, not a query. */
+const id = { type: 'integer', minimum: 1, maximum: 2_147_483_647 } as const;
 
 async function loadOwnedOrder(ctx: ToolContext, orderId: number) {
   const order = await ctx.shop.getOrder(orderId);
@@ -123,11 +124,22 @@ export const toolSpecs = (): ToolSpec[] =>
 const ajv = new Ajv({ allErrors: true, strict: true });
 const validators = new Map(TOOLS.map((t) => [t.name, ajv.compile(t.inputSchema)]));
 
+/** Postgres text and jsonb cannot store NUL, so it must not get past validation (strings and object keys, at any depth). */
+function containsNul(v: unknown): boolean {
+  if (typeof v === 'string') return v.includes('\u0000');
+  if (Array.isArray(v)) return v.some(containsNul);
+  if (v && typeof v === 'object') return Object.entries(v).some(([k, x]) => k.includes('\u0000') || containsNul(x));
+  return false;
+}
+
 /** Validates model-supplied arguments against the tool's JSON schema before anything executes. */
 export function validateToolInput(toolName: string, args: unknown): { ok: true } | { ok: false; errors: string[] } {
   const validate = validators.get(toolName);
   if (!validate) return { ok: false, errors: [`Unknown tool "${toolName}"`] };
-  if (validate(args)) return { ok: true };
+  if (validate(args)) {
+    if (containsNul(args)) return { ok: false, errors: ['(root) must not contain null characters'] };
+    return { ok: true };
+  }
   return {
     ok: false,
     errors: (validate.errors ?? []).map((e) => `${e.instancePath || '(root)'} ${e.message}`.trim()),

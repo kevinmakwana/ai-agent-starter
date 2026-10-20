@@ -52,7 +52,7 @@ export function Chat({ detail, customer, sending, optimistic, error, onSend, onR
         <span className="muted">{detail.conversation.customerEmail} · customer #{detail.conversation.customerId}</span>
       </div>
       <div className="messages">
-        {runs.flatMap((run) => run.steps.filter((s) => s.role === 'user' || (s.role === 'assistant' && !s.toolName)).map((s) => (
+        {runs.flatMap((run) => run.steps.filter((s) => s.role === 'user' || (s.role === 'assistant' && !s.toolName && s.content?.trim())).map((s) => (
           <div key={s.id} className={`bubble ${s.role}`}>{s.content}</div>
         )))}
         {optimistic && !echoed && <div className="bubble user">{optimistic}</div>}
