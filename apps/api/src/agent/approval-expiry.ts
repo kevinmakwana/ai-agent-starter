@@ -37,7 +37,7 @@ export class ApprovalExpiry {
     const note = `Expired: no reviewer decision within ${describeSpan(ttlMs)}.`;
     for (const action of await store.listPendingActionsOlderThan(new Date(now() - ttlMs))) {
       try {
-        await runner.decide(action.id, 'reject', note);
+        await runner.decide(action.id, 'reject', note, 'system');
         result.expired++;
       } catch (e) {
         // Already decided by a reviewer in the meantime is fine; anything else is reported and the sweep carries on.
