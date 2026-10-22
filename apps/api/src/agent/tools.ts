@@ -14,7 +14,7 @@ export interface ToolDef {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
-  /** Risky tools never run inline: they are parked as pending_approval actions. */
+  /** Risky tools are parked as pending_approval actions unless the approval policy auto-approves the call, in which case it runs inline. */
   risky?: boolean;
   /** Policy checks run before a risky call is parked (and again when executing). Returns what the approval policy should weigh. */
   preflight?: (ctx: ToolContext, args: any) => Promise<ApprovalFacts | void>;

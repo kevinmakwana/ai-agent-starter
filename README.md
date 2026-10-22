@@ -20,7 +20,7 @@ A small, framework-free **tool-calling agent** for a fictional store, "Acme Shop
 
 - **The agent loop is ~150 lines you can read** ([runner.ts](apps/api/src/agent/runner.ts)): no LangChain, no hidden prompts, no magic. Good starting point for understanding what agent frameworks actually do.
 - **Guardrails live in code.** The conversation is bound to one customer, tool arguments are JSON-schema validated before execution, unknown tools are rejected, refunds can't exceed the order total minus earlier refunds (re-checked in a row-locking transaction at approval time), and runs have a step limit.
-- **Human-in-the-loop done properly.** Risky tool calls become `pending_approval` actions, the run pauses (and survives restarts, since history is rebuilt from Postgres), and `POST /approvals/:id` resumes it.
+- **Human-in-the-loop done properly.** Risky tool calls become `pending_approval` actions, the run pauses (and survives restarts, since history is rebuilt from Postgres), and `POST /approvals/:id` resumes it. Refunds under `REFUND_AUTO_APPROVE_UNDER` skip the queue, and every decision, automatic or human, lands in the audit log.
 - **Everything is a trace.** Every run stores each step: role, content, tool, args, result, latency and tokens.
 - **Offline by default.** A rule-based mock planner makes the demo, tests and CI deterministic and free; real providers are plain `fetch` adapters behind a one-method interface.
 
@@ -102,6 +102,7 @@ It asks "Where is my order #1?", validates the tool call against the real tool s
 | `GET /conversations/:id` | 🔑 Full trace: runs → steps, plus approvals and token `usage` (per run and per conversation, with the budget) |
 | `POST /conversations/:id/messages` | 🔑 Send `{ content }`; runs the agent until it answers or pauses (`409` while another run is in progress or an approval is pending) |
 | `GET /approvals?status=pending` | 🔒  List approvals (`pending` \| `approved` \| `rejected` \| `all`) with customer, order and reasoning context |
+| `GET /approvals/events` | 🔒 Append-only audit log of approval decisions, newest first (`conversationId`, `limit` up to 200, `before` event id). Kinds: `requested`, `auto_approved`, `approved`, `rejected`, `expired` |
 | `POST /approvals/:id` | 🔒 `{ decision: "approve" \| "reject", note? }`; executes the parked call and resumes the run (`409` if already decided) |
 | `GET /customers` | 🔒 Customers for the demo picker (extra) |
 | `GET /health` | API + database + active provider + whether reviewer auth is on |
@@ -126,6 +127,7 @@ One root `.env` (see [.env.example](.env.example)); everything is optional.
 | `CONVERSATION_TOKEN_BUDGET` | `200000` | Max tokens (input + output) per conversation; after that the agent stops calling the model and the run ends `budget_exceeded`. A soft cap: the call that crosses it still completes |
 | `CONTEXT_MAX_TOKENS` | `8000` | Rough cap on the history sent per model call. Whole old turns are left out (the model is told); the stored trace is never trimmed |
 | `APPROVAL_TTL_MINUTES` | `1440` | Pending approvals older than this are auto-rejected and the agent tells the customer. `0` = never |
+| `REFUND_AUTO_APPROVE_UNDER` | `0` | Dollars. A refund is approved automatically (and logged as `auto_approved`) when it plus earlier refunds on the same order stays strictly under this amount. `0` = every refund waits for a reviewer |
 | `RATE_LIMIT_PER_MINUTE` | `600` | Per-client limit across the API (`/health` is exempt) |
 | `RATE_LIMIT_START_PER_MINUTE` / `RATE_LIMIT_MESSAGES_PER_MINUTE` | `10` / `20` | Stricter per-client limits on `POST /conversations` and `POST /conversations/:id/messages` |
 | `CORS_ORIGINS` | _(empty)_ | Comma-separated exact origins allowed to call the API from a browser. Empty = none |
@@ -160,12 +162,16 @@ This is a **starter, not a production service**. What is and isn't protected:
 - **Conversations are capability-protected.** `POST /conversations` returns a random `accessToken` once; only its SHA-256 hash is stored. Reading or posting to a conversation needs that token (or the reviewer key), and unknown ids and wrong tokens are both `401`, so ids can't be probed. The customer page keeps its tokens in `localStorage`.
 - **Demo mode is open.** With `REVIEWER_API_KEY` unset the API logs a warning and skips all of the above so the zero-config demo works. Set the key for anything beyond a local demo.
 - **Still not solved: who may start a conversation.** There is no customer login, so anyone can start a conversation as any customer by `customerId` or account email. The guardrails bind *the agent* to that customer; they can't prove *the caller is* that customer. Plug in a real identity provider (derive the customer from the session, not the body) before using real data.
-- **Reviewer identity is one shared key**: no per-reviewer accounts, no four-eyes rule (approver ≠ requester), no audit trail of who decided.
+- **Reviewer identity is one shared key**: no per-reviewer accounts, no four-eyes rule (approver ≠ requester). Decisions are logged, but the log does not say *which* reviewer decided.
 - Upstream LLM error bodies are logged server-side only and never returned to clients.
 - **HTTP hardening.** `helmet` sets standard security headers, CORS is off unless `CORS_ORIGINS` lists exact origins, and requests are rate limited per client (`429` with `Retry-After`), most tightly on starting conversations and sending messages since those cost LLM calls.
 - **Client identity behind proxies.** Rate limits key on the client address. Without `TRUST_PROXY` that is the socket peer, so behind the bundled Next.js proxy every customer shares one bucket (fine for a demo, too coarse for production). Set `TRUST_PROXY=1` only when a trusted load balancer in front sets `X-Forwarded-For`; if the proxy is directly exposed, clients can spoof the header.
 - **Cost controls.** Each conversation has a token budget, the history sent to the model is capped, and `GET /conversations/:id` reports `usage` per run and per conversation. Failed runs show customers a generic error; reviewers see the real one.
 - **Approvals expire.** Pending approvals are auto-rejected after `APPROVAL_TTL_MINUTES`. The sweep runs in-process every minute, so it assumes a single API instance.
+- **Auto-approval is opt-in and cumulative.** With `REFUND_AUTO_APPROVE_UNDER` unset nothing is auto-approved. When set, the check counts earlier refunds on the order, so a large refund cannot be split into small ones; it does not cap refunds across a customer's different orders. Two conversations of one customer approving at the same instant could briefly exceed the threshold on one order; the order total still caps it. The `auto_approved` event is written before the refund runs, and the refund does not run if the event cannot be written.
+- **Known limitation: the cumulative check is not atomic.** The auto-approve check is not atomic across two conversations of the same customer refunding the same order at once, so both can pass it. The over-refund guard in `createRefund` still caps the total refunded at the order total.
+- **Audit log.** `approval_events` is append-only and written in the same transaction as the decision it records. If execution fails after a reviewer's decision is claimed and the reviewer retries, the log shows two decision rows for that one action; the history stays accurate rather than being rewritten.
+- **Customers never see the policy.** The customer view of `GET /conversations/:id` omits the policy fields (`policyRule`, `policyDetail`), so the threshold and the rule that applied are visible to reviewers only.
 - **Crash recovery.** If the process dies after a reviewer's decision is claimed but before it is carried out, the same minute-by-minute pass finishes it once the claim is five minutes old (even with expiry disabled). Refunds are idempotent per approval, so a refund that had already committed is never paid twice.
 - **Input limits.** Messages are trimmed, must be 1-2000 characters, and may not contain NUL (Postgres text cannot hold it); tool ids are bounded to the database's integer range. Bad values are a `400` at the edge instead of a failed run.
 - **Provider replies.** A body that is not JSON, one cut off mid-read, or an empty model reply becomes a `502` and a failed run (an empty reply is kept in the trace, flagged `EMPTY_RESPONSE`, with its tokens counted, but never replayed to the model).
@@ -173,7 +179,7 @@ This is a **starter, not a production service**. What is and isn't protected:
 ## Next steps
 
 - Stream runs to the UI over SSE instead of polling.
-- Real identity: customer login (so the customer comes from a session, not the request body), per-reviewer accounts, four-eyes approval and an audit log (see Security notes).
+- Real identity: customer login (so the customer comes from a session, not the request body), per-reviewer accounts, and four-eyes approval (see Security notes); decisions are already logged, but the log does not yet say *which* reviewer decided.
 - Run steps as a background job (queue) so long agent runs don't hold an HTTP request open.
 - Prompt-injection and eval suites; replay recorded traces against new prompts or models.
 - Per-tool rate limits and spend budgets across conversations (per-conversation token budgets exist).

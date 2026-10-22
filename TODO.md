@@ -35,8 +35,8 @@
 
 ## Phase 4: Features
 - [ ] 4.1 SSE streaming of runs (API + `EventSource` in the web app).
-- [ ] 4.2 Threshold-based approval policy per tool.
-- [ ] 4.3 Audit log of approval decisions, shown in the reviewer console.
+- [x] 4.2 Threshold-based approval policy per tool.
+- [x] 4.3 Audit log of approval decisions, shown in the reviewer console.
 - [ ] 4.4 Reviewer notifications on new pending approvals (webhook, then email/Slack).
 - [ ] 4.5 Per-reviewer accounts, four-eyes rule, then customer login.
 - [ ] 4.6 More tools: `cancel_order` (risky), `track_shipment`.
