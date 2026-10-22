@@ -1,5 +1,5 @@
-import { Transform } from 'class-transformer';
-import { IsEmail, IsIn, IsInt, IsNotEmpty, IsOptional, IsString, Length, Matches, Max, MaxLength, Min, ValidateIf } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
+import { IsEmail, IsIn, IsInt, IsNotEmpty, IsOptional, IsString, IsUUID, Length, Matches, Max, MaxLength, Min, ValidateIf } from 'class-validator';
 
 /** Postgres text and jsonb cannot hold NUL; refuse it at the edge instead of failing deep inside a run. */
 const NO_NUL = /^[^\u0000]*$/;
@@ -36,4 +36,16 @@ export class DecideApprovalDto {
 
   @IsOptional() @IsString() @MaxLength(500) @noNul()
   note?: string;
+}
+
+export class ListApprovalEventsQuery {
+  @IsOptional() @IsUUID()
+  conversationId?: string;
+
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(200)
+  limit?: number;
+
+  /** Event id to page from: returns events older than it. */
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(Number.MAX_SAFE_INTEGER)
+  before?: number;
 }

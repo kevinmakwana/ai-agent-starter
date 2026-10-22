@@ -1,9 +1,11 @@
 import { type INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import type { Pool } from 'pg';
+import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { PgAgentStore } from '../src/db/pg-agent.store';
 import { seedDatabase } from '../src/db/seed-data';
+import { configureApp } from '../src/http/setup';
 import { PG_POOL } from '../src/tokens';
 
 // Runs against a real Postgres; skipped unless E2E_DATABASE_URL is set (CI sets it).
@@ -121,5 +123,122 @@ maybe('approval audit log in the store (real Postgres)', () => {
     await park();
     await seedDatabase(pool);
     expect(await store.listApprovalEvents()).toEqual([]);
+  });
+});
+
+maybe('approval audit log over HTTP (real Postgres)', () => {
+  let app: INestApplication;
+  const http = () => request(app.getHttpServer());
+  const reviewer = { Authorization: 'Bearer s3cret' };
+
+  const boot = async (env: Record<string, string> = {}) => {
+    process.env.DATABASE_URL = process.env.E2E_DATABASE_URL;
+    process.env.LLM_PROVIDER = 'mock';
+    process.env.MOCK_DELAY_MS = '0';
+    process.env.REVIEWER_API_KEY = 's3cret';
+    Object.assign(process.env, env);
+    app = (await Test.createTestingModule({ imports: [AppModule] }).compile()).createNestApplication();
+    configureApp(app);
+    await app.init();
+    await seedDatabase(app.get(PG_POOL));
+  };
+  const start = async (customerId: number) => {
+    const res = await http().post('/conversations').send({ customerId }).expect(201);
+    return { id: res.body.id as string, token: { 'x-conversation-token': res.body.accessToken as string } };
+  };
+  const say = (c: { id: string; token: Record<string, string> }, content: string) =>
+    http().post(`/conversations/${c.id}/messages`).set(c.token).send({ content }).expect(201);
+
+  afterEach(async () => {
+    await app?.close();
+    delete process.env.REVIEWER_API_KEY;
+    delete process.env.REFUND_AUTO_APPROVE_UNDER;
+  });
+
+  describe('with the default policy (every refund reviewed)', () => {
+    beforeEach(() => boot());
+
+    it('logs requested then approved, newest first, and explains the wait on the approval', async () => {
+      const c = await start(1);
+      await say(c, 'Order #1 arrived damaged, please refund it');
+
+      const [pending] = (await http().get('/approvals?status=pending').set(reviewer).expect(200)).body;
+      expect(pending).toMatchObject({ policyRule: 'always_review' });
+      await http().post(`/approvals/${pending.id}`).set(reviewer).send({ decision: 'approve', note: 'ok' }).expect(201);
+
+      const events = (await http().get('/approvals/events').set(reviewer).expect(200)).body;
+      expect(events.map((e: any) => [e.kind, e.actorType])).toEqual([['approved', 'reviewer'], ['requested', 'policy']]);
+      expect(events[0]).toMatchObject({ actionId: pending.id, note: 'ok', actorId: null, toolName: 'issue_refund' });
+      expect(events[0].toolArgs).toMatchObject({ orderId: 1, amount: 18.75 });
+    });
+
+    it('filters by conversation and pages with limit and before', async () => {
+      const a = await start(1);
+      const b = await start(2);
+      await say(a, 'refund order #1');
+      await say(b, 'refund order #12');
+
+      const mine = (await http().get(`/approvals/events?conversationId=${a.id}`).set(reviewer).expect(200)).body;
+      expect(mine).toHaveLength(1);
+      expect(mine[0].conversationId).toBe(a.id);
+
+      const first = (await http().get('/approvals/events?limit=1').set(reviewer).expect(200)).body;
+      expect(first).toHaveLength(1);
+      const rest = (await http().get(`/approvals/events?limit=10&before=${first[0].id}`).set(reviewer).expect(200)).body;
+      expect(rest).toHaveLength(1);
+      expect(rest[0].id).toBeLessThan(first[0].id);
+    });
+
+    it('rejects bad query input with 400, not a database error', async () => {
+      for (const q of ['limit=0', 'limit=201', 'limit=many', 'before=0', 'before=abc', 'conversationId=nope', 'extra=1']) {
+        await http().get(`/approvals/events?${q}`).set(reviewer).expect(400);
+      }
+    });
+
+    it('is for reviewers only: a conversation token is not enough', async () => {
+      const c = await start(1);
+      await http().get('/approvals/events').expect(401);
+      await http().get('/approvals/events').set(c.token).expect(401);
+      await http().get('/approvals/events').set(reviewer).expect(200);
+    });
+
+    it('never puts events or policy details in the customer view of a conversation', async () => {
+      const c = await start(1);
+      await say(c, 'refund order #1');
+      const trace = (await http().get(`/conversations/${c.id}`).set(c.token).expect(200)).body;
+      expect(JSON.stringify(trace)).not.toContain('auto_approved');
+      expect(JSON.stringify(trace)).not.toContain('"events"');
+    });
+  });
+
+  describe('with REFUND_AUTO_APPROVE_UNDER=25', () => {
+    beforeEach(() => boot({ REFUND_AUTO_APPROVE_UNDER: '25' }));
+
+    it('refunds order #1 (18.75) at once, logs auto_approved, and leaves no approval or action_id', async () => {
+      const c = await start(1);
+      const sent = await say(c, 'Order #1 arrived damaged, please refund it');
+      expect(sent.body.run.status).toBe('completed');
+
+      expect((await http().get('/approvals').set(reviewer).expect(200)).body).toEqual([]);
+      const pool = app.get<Pool>(PG_POOL);
+      const { rows } = await pool.query('SELECT amount::float AS amount, action_id FROM refunds WHERE order_id = 1');
+      expect(rows).toEqual([{ amount: 18.75, action_id: null }]);
+
+      const events = (await http().get('/approvals/events').set(reviewer).expect(200)).body;
+      expect(events).toEqual([
+        expect.objectContaining({
+          kind: 'auto_approved', actorType: 'policy', actionId: null, rule: 'under_threshold',
+          detail: { threshold: 25, priorRefunded: 0, amount: 18.75 },
+        }),
+      ]);
+    });
+
+    it('still parks a refund that would push the order to the threshold', async () => {
+      const c = await start(2); // order 12: total 66.99, 10.00 already refunded, 56.99 refundable
+      const sent = await say(c, 'refund order #12');
+      expect(sent.body.run.status).toBe('awaiting_approval');
+      const [approval] = (await http().get('/approvals?status=pending').set(reviewer).expect(200)).body;
+      expect(approval).toMatchObject({ policyRule: 'over_threshold', policyDetail: { threshold: 25, priorRefunded: 10, amount: 56.99 } });
+    });
   });
 });

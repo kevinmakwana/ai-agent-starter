@@ -2,7 +2,7 @@ import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query, UseGuards } f
 import { AgentRunner } from '../agent/runner';
 import type { ActionStatus } from '../agent/types';
 import { PgAgentStore } from '../db/pg-agent.store';
-import { DecideApprovalDto, ListApprovalsQuery } from './dto';
+import { DecideApprovalDto, ListApprovalEventsQuery, ListApprovalsQuery } from './dto';
 import { ReviewerGuard } from './reviewer.guard';
 
 const STATUS: Record<string, ActionStatus | undefined> = {
@@ -17,6 +17,12 @@ export class ApprovalsController {
   @Get()
   list(@Query() q: ListApprovalsQuery) {
     return this.store.listApprovals({ status: STATUS[q.status ?? 'all'] });
+  }
+
+  /** The append-only audit log of approval decisions, newest first. */
+  @Get('events')
+  events(@Query() q: ListApprovalEventsQuery) {
+    return this.store.listApprovalEvents(q);
   }
 
   /** Approve executes the parked tool call and resumes the run; reject tells the agent it was declined. */
