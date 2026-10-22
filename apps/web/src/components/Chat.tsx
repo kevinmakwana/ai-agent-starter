@@ -25,7 +25,7 @@ export function Chat({ detail, customer, sending, optimistic, error, onSend, onR
       <main className="panel chat">
         <div className="placeholder">
           <h1>Acme Shop support agent</h1>
-          <p>{readOnly ? 'Select a conversation to read its transcript and trace.' : 'Start a conversation on the left. The agent answers by calling tools against Postgres; refunds wait for a human.'}</p>
+          <p>{readOnly ? 'Select a conversation to read its transcript and trace.' : 'Start a conversation on the left. The agent answers by calling tools against Postgres; larger refunds wait for a human.'}</p>
         </div>
       </main>
     );

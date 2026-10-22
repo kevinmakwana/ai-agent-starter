@@ -37,7 +37,7 @@ const guardrailResult = (e: GuardrailViolation) => ({ error: e.message, code: e.
 
 /**
  * The whole agent: call the model, validate + guard each tool call, execute safe tools,
- * park risky ones for human approval, repeat until the model answers or the step budget ends.
+ * park risky ones for human approval unless the approval policy lets them run, repeat until the model answers or the step budget ends.
  */
 export class AgentRunner {
   private readonly maxSteps: number;

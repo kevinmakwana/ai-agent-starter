@@ -16,7 +16,7 @@ export interface ToolDef {
   inputSchema: Record<string, unknown>;
   /** Risky tools are parked as pending_approval actions unless the approval policy auto-approves the call, in which case it runs inline. */
   risky?: boolean;
-  /** Policy checks run before a risky call is parked (and again when executing). Returns what the approval policy should weigh. */
+  /** Policy checks run before a risky call is parked (createRefund re-checks when it executes). Returns what the approval policy should weigh. */
   preflight?: (ctx: ToolContext, args: any) => Promise<ApprovalFacts | void>;
   execute: (ctx: ToolContext, args: any) => Promise<unknown>;
 }
@@ -91,7 +91,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: 'issue_refund',
     description:
-      'Request a refund for an order. RISKY: this does not refund immediately; it is queued for human approval. ' +
+      'Request a refund for an order. RISKY: it either issues the refund immediately or queues it for a human reviewer; the result says which. ' +
       'The amount may not exceed the order total minus earlier refunds.',
     risky: true,
     inputSchema: {

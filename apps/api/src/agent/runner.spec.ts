@@ -12,6 +12,11 @@ function setup(provider: ChatProvider = new MockProvider(), maxSteps = 8, tokenB
   return { shop, store, conv, runner: new AgentRunner({ provider, shop, store, maxSteps, tokenBudget, maxContextTokens }) };
 }
 
+const scripted = (calls: Completion[]): ChatProvider => {
+  let i = 0;
+  return { name: 'scripted', complete: async () => calls[Math.min(i++, calls.length - 1)] };
+};
+
 const toolSteps = (store: MemoryStore) => store.steps.filter((s) => s.toolName).map((s) => `${s.role}:${s.toolName}`);
 
 describe('agent loop with the mock provider', () => {
@@ -121,11 +126,6 @@ describe('run metadata', () => {
 });
 
 describe('agent loop safety', () => {
-  const scripted = (calls: Completion[]): ChatProvider => {
-    let i = 0;
-    return { name: 'scripted', complete: async () => calls[Math.min(i++, calls.length - 1)] };
-  };
-
   it('refuses a second message while a run is still in flight, then accepts one after it finishes', async () => {
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));
@@ -322,11 +322,6 @@ describe('conversation context', () => {
 });
 
 describe('failures around a run', () => {
-  const scripted = (calls: Completion[]): ChatProvider => {
-    let i = 0;
-    return { name: 'scripted', complete: async () => calls[Math.min(i++, calls.length - 1)] };
-  };
-
   it('does not leave the conversation blocked when the first user message cannot be saved', async () => {
     const { runner, store, conv } = setup();
     const addStep = store.addStep.bind(store);
@@ -502,6 +497,52 @@ describe('approval policy', () => {
 
     expect(shop.refunds).toHaveLength(0);
     expect(store.events).toEqual([]); // nothing was decided, so nothing is logged
+  });
+});
+
+describe('approval policy with scripted model calls', () => {
+  const build = (provider: ChatProvider, refundAutoApproveUnder: number) => {
+    const shop = new MemoryShop();
+    const store = new MemoryStore();
+    const runner = new AgentRunner({ provider, shop, store, approvalPolicy: { refundAutoApproveUnder } });
+    return { shop, store, runner, conv: store.addConversation(1) };
+  };
+
+  it("refuses issue_refund on another customer's order even with auto-approval on: no event, no refund", async () => {
+    const { runner, store, shop, conv } = build(
+      scripted([
+        { toolCalls: [{ id: 'r1', name: 'issue_refund', args: { orderId: 2, amount: 5, reason: 'not mine' } }] },
+        { text: 'done', toolCalls: [] },
+      ]),
+      100,
+    );
+    const run = await runner.handleUserMessage(conv, 'refund order #2');
+
+    expect(run.status).toBe('completed');
+    expect(store.steps.find((s) => s.role === 'tool' && s.toolName === 'issue_refund')?.result).toMatchObject({ code: 'CROSS_CUSTOMER' });
+    expect(store.events).toEqual([]);
+    expect(store.actions.size).toBe(0);
+    expect(shop.refunds).toHaveLength(0);
+  });
+
+  it('counts refunds made earlier in the same turn: two $10 refunds auto-approve under $25, the third is parked', async () => {
+    const refund = (id: string) => ({ id, name: 'issue_refund', args: { orderId: 1, amount: 10, reason: 'damaged item' } });
+    const { runner, store, shop, conv } = build(
+      scripted([{ toolCalls: [refund('r1'), refund('r2'), refund('r3')] }, { text: 'ok', toolCalls: [] }]),
+      25,
+    );
+    const run = await runner.handleUserMessage(conv, 'refund order #1 three times');
+
+    expect(run.status).toBe('awaiting_approval');
+    expect(shop.refunds.map((r) => r.amount)).toEqual([10, 10]); // $20 refunded, the third did not run
+    expect([...store.actions.values()]).toEqual([
+      expect.objectContaining({ toolCallId: 'r3', status: 'pending_approval', toolArgs: expect.objectContaining({ amount: 10 }) }),
+    ]);
+    expect(store.events.map((e) => [e.kind, e.rule, e.detail])).toEqual([
+      ['auto_approved', 'under_threshold', { threshold: 25, priorRefunded: 0, amount: 10 }],
+      ['auto_approved', 'under_threshold', { threshold: 25, priorRefunded: 10, amount: 10 }],
+      ['requested', 'over_threshold', { threshold: 25, priorRefunded: 20, amount: 10 }],
+    ]);
   });
 });
 
