@@ -100,7 +100,42 @@ export interface Action {
   decidedAt: string | null;
 }
 
-export type NewAction = Pick<Action, 'runId' | 'conversationId' | 'toolName' | 'toolArgs' | 'toolCallId' | 'reasoning'>;
+export type NewAction = Pick<Action, 'runId' | 'conversationId' | 'toolName' | 'toolArgs' | 'toolCallId' | 'reasoning'> & {
+  /** Why a human is needed; becomes the rule and detail of the `requested` audit event. */
+  policy?: { rule: string; detail: Record<string, unknown> };
+};
+
+export type ApprovalEventKind = 'requested' | 'auto_approved' | 'approved' | 'rejected' | 'expired';
+export type ApprovalActorType = 'reviewer' | 'system' | 'policy';
+
+/** One immutable line of the approval audit log. */
+export interface ApprovalEvent {
+  id: number;
+  kind: ApprovalEventKind;
+  /** Null for auto-approved calls, which never create an action. */
+  actionId: string | null;
+  runId: string;
+  conversationId: string;
+  actorType: ApprovalActorType;
+  /** Reserved for reviewer accounts; always null until they exist. */
+  actorId: string | null;
+  toolName: string;
+  /** The call as it was at that moment. */
+  toolArgs: Record<string, unknown>;
+  rule: string | null;
+  detail: Record<string, unknown> | null;
+  note: string | null;
+  createdAt: string;
+}
+
+export type NewApprovalEvent = Pick<ApprovalEvent, 'kind' | 'runId' | 'conversationId' | 'actorType' | 'toolName' | 'toolArgs'> &
+  Partial<Pick<ApprovalEvent, 'actionId' | 'actorId' | 'rule' | 'detail' | 'note'>>;
+
+/** What the decision event should say about who decided and how. */
+export interface DecisionAudit {
+  kind: 'approved' | 'rejected' | 'expired';
+  actorType: 'reviewer' | 'system';
+}
 
 /** Everything the agent reads/writes about the shop. Implemented by Postgres and (in tests) in memory. */
 export interface ShopRepo {
@@ -130,10 +165,14 @@ export interface AgentStore {
   /** Tokens the model has billed this conversation so far (summed over its steps). */
   conversationUsage(conversationId: string): Promise<{ inputTokens: number; outputTokens: number }>;
   listSteps(conversationId: string): Promise<Step[]>;
+  /** Also writes the `requested` audit event, atomically. */
   createAction(action: NewAction): Promise<Action>;
   getAction(id: string): Promise<Action | null>;
-  /** Atomic claim: only succeeds while the action is still pending_approval. */
-  decideAction(id: string, status: 'approved' | 'rejected', note?: string): Promise<Action | null>;
+  /** Atomic claim: only succeeds while the action is still pending_approval. Writes the decision event in the same transaction. */
+  decideAction(id: string, status: 'approved' | 'rejected', note?: string, audit?: DecisionAudit): Promise<Action | null>;
+  addApprovalEvent(event: NewApprovalEvent): Promise<ApprovalEvent>;
+  /** Newest first. `before` is an event id to page from. */
+  listApprovalEvents(filter?: { conversationId?: string; limit?: number; before?: number }): Promise<ApprovalEvent[]>;
   /** Pending approvals created before `cutoff`, oldest first. */
   listPendingActionsOlderThan(cutoff: Date): Promise<Action[]>;
   /** Decided more than a moment ago, yet never completed (no result) while its run still waits: the process died mid-decision. */

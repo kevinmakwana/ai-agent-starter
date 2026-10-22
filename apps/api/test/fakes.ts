@@ -1,7 +1,7 @@
 import { ConflictError, GuardrailViolation } from '../src/agent/errors';
 import { assertRefundable, assertSameCustomer } from '../src/agent/guardrails';
 import type {
-  Action, AgentStore, Conversation, Customer, NewAction, NewStep, Order, Run, RunMeta, ShopRepo, Step, Ticket,
+  Action, AgentStore, ApprovalEvent, Conversation, Customer, DecisionAudit, NewAction, NewApprovalEvent, NewStep, Order, Run, RunMeta, ShopRepo, Step, Ticket,
 } from '../src/agent/types';
 
 export const CUSTOMERS: Customer[] = [
@@ -50,6 +50,7 @@ export class MemoryStore implements AgentStore {
   runs = new Map<string, Run>();
   steps: Step[] = [];
   actions = new Map<string, Action>();
+  events: ApprovalEvent[] = [];
   private n = 0;
 
   addConversation(customerId: number): Conversation {
@@ -96,17 +97,42 @@ export class MemoryStore implements AgentStore {
       outputTokens: mine.reduce((n, x) => n + (x.outputTokens ?? 0), 0),
     };
   }
-  async createAction(a: NewAction) {
+  async createAction({ policy, ...a }: NewAction) {
     const action: Action = { ...a, id: `act-${++this.n}`, status: 'pending_approval', decisionNote: null, result: null, createdAt: '', decidedAt: null };
     this.actions.set(action.id, action);
+    await this.addApprovalEvent({
+      kind: 'requested', actionId: action.id, runId: a.runId, conversationId: a.conversationId, actorType: 'policy',
+      toolName: a.toolName, toolArgs: a.toolArgs, rule: policy?.rule, detail: policy?.detail,
+    });
     return { ...action };
   }
   async getAction(id: string) { const a = this.actions.get(id); return a ? { ...a } : null; }
-  async decideAction(id: string, status: 'approved' | 'rejected', note?: string) {
+  async decideAction(
+    id: string, status: 'approved' | 'rejected', note?: string,
+    audit: DecisionAudit = { kind: status, actorType: 'reviewer' },
+  ) {
     const a = this.actions.get(id);
     if (!a || a.status !== 'pending_approval') return null;
     Object.assign(a, { status, decisionNote: note ?? null, decidedAt: new Date().toISOString() });
+    await this.addApprovalEvent({
+      kind: audit.kind, actionId: id, runId: a.runId, conversationId: a.conversationId, actorType: audit.actorType,
+      toolName: a.toolName, toolArgs: a.toolArgs, note,
+    });
     return { ...a };
+  }
+  async addApprovalEvent(e: NewApprovalEvent) {
+    const event: ApprovalEvent = {
+      id: this.events.length + 1, actionId: null, actorId: null, rule: null, detail: null, note: null, createdAt: '',
+      ...(Object.fromEntries(Object.entries(e).filter(([, v]) => v !== undefined)) as object),
+    } as ApprovalEvent;
+    this.events.push(event);
+    return event;
+  }
+  async listApprovalEvents(filter: { conversationId?: string; limit?: number; before?: number } = {}) {
+    return this.events
+      .filter((e) => (!filter.conversationId || e.conversationId === filter.conversationId) && (filter.before === undefined || e.id < filter.before))
+      .sort((x, y) => y.id - x.id)
+      .slice(0, filter.limit ?? 100);
   }
   async listPendingActionsOlderThan(cutoff: Date) {
     return [...this.actions.values()]

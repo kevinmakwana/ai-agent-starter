@@ -98,7 +98,26 @@ CREATE TABLE IF NOT EXISTS refunds (
 CREATE INDEX IF NOT EXISTS refunds_order_idx ON refunds (order_id);
 -- At most one refund per approved action, whatever the application code does.
 CREATE UNIQUE INDEX IF NOT EXISTS refunds_action_uniq ON refunds (action_id) WHERE action_id IS NOT NULL;
+
+-- Append-only: the application only ever inserts. Rows go away only with their conversation.
+CREATE TABLE IF NOT EXISTS approval_events (
+  id bigserial PRIMARY KEY,
+  kind text NOT NULL CHECK (kind IN ('requested', 'auto_approved', 'approved', 'rejected', 'expired')),
+  action_id uuid REFERENCES actions(id) ON DELETE CASCADE,
+  run_id uuid NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+  conversation_id uuid NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  actor_type text NOT NULL CHECK (actor_type IN ('reviewer', 'system', 'policy')),
+  actor_id text,
+  tool_name text NOT NULL,
+  tool_args jsonb NOT NULL,
+  rule text,
+  detail jsonb,
+  note text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS approval_events_conversation_idx ON approval_events (conversation_id, id);
+CREATE INDEX IF NOT EXISTS approval_events_action_idx ON approval_events (action_id);
 `;
 
 export const RESET_SQL =
-  'TRUNCATE customers, orders, tickets, refunds, conversations, runs, steps, actions RESTART IDENTITY CASCADE';
+  'TRUNCATE customers, orders, tickets, refunds, conversations, runs, steps, actions, approval_events RESTART IDENTITY CASCADE';
