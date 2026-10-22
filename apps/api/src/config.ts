@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
+import type { ApprovalPolicyConfig } from './agent/policy';
 
 /** Loads the single root .env (nearest one above cwd). Existing environment variables win. */
 export function loadRootEnv(startDir = process.cwd()): void {
@@ -38,6 +39,17 @@ function nonNegativeInt(env: NodeJS.ProcessEnv, name: string, fallback: number):
   if (raw === undefined || raw === '') return fallback;
   const n = Number(raw);
   if (!Number.isInteger(n) || n < 0) throw new Error(`${name} must be a whole number, 0 or more (got "${raw}")`);
+  return n;
+}
+
+/** A dollar amount: 0 or more, at most 2 decimals. */
+function moneyAmount(env: NodeJS.ProcessEnv, name: string, fallback: number): number {
+  const raw = env[name];
+  if (raw === undefined || raw === '') return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0 || Math.abs(n * 100 - Math.round(n * 100)) > 1e-6) {
+    throw new Error(`${name} must be an amount in dollars, 0 or more, with at most 2 decimals (got "${raw}")`);
+  }
   return n;
 }
 
@@ -85,6 +97,8 @@ export interface AppConfig {
   contextMaxTokens: number;
   /** Pending approvals older than this many minutes are auto-rejected. 0 = never expire. */
   approvalTtlMinutes: number;
+  /** Which risky tool calls skip human review. Defaults to none. */
+  approvalPolicy: ApprovalPolicyConfig;
   /** Extra attempts for retryable provider failures (network, 408, 429, 5xx). */
   llmMaxRetries: number;
   /** Output cap per model call. Unset = Anthropic 4096 / OpenAI the model's own limit. */
@@ -114,6 +128,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     conversationTokenBudget: positiveInt(env, 'CONVERSATION_TOKEN_BUDGET', 200_000),
     contextMaxTokens: positiveInt(env, 'CONTEXT_MAX_TOKENS', 8000),
     approvalTtlMinutes: nonNegativeInt(env, 'APPROVAL_TTL_MINUTES', 1440),
+    approvalPolicy: { refundAutoApproveUnder: moneyAmount(env, 'REFUND_AUTO_APPROVE_UNDER', 0) },
     llmMaxRetries: nonNegativeInt(env, 'LLM_MAX_RETRIES', 2),
     llmMaxTokens: env.LLM_MAX_TOKENS ? positiveInt(env, 'LLM_MAX_TOKENS', 0) : undefined,
     provider,
