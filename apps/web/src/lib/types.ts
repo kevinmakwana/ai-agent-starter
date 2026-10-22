@@ -22,6 +22,8 @@ export interface Run {
   provider: string | null; model: string | null; promptVersion: string | null;
 }
 
+export interface PolicyDetail { threshold?: number; priorRefunded?: number; amount?: number }
+
 export interface Approval {
   id: string; runId: string; conversationId: string; toolName: string;
   toolArgs: { orderId?: number; amount?: number; reason?: string };
@@ -29,9 +31,9 @@ export interface Approval {
   decisionNote: string | null; createdAt: string; decidedAt: string | null;
   customerName: string; customerEmail: string; userMessage: string | null;
   orderTotal: number | null; orderRefunded: number;
-  /** Why a human was needed (from the audit log); null for approvals created before the log existed. */
-  policyRule: string | null;
-  policyDetail: { threshold?: number; priorRefunded?: number; amount?: number } | null;
+  /** Why a human was needed (from the audit log); null for approvals created before the log existed. Absent in customer views. */
+  policyRule?: string | null;
+  policyDetail?: PolicyDetail | null;
 }
 
 export interface ConversationDetail {
@@ -52,7 +54,7 @@ export interface ApprovalEvent {
   toolName: string;
   toolArgs: { orderId?: number; amount?: number; reason?: string };
   rule: string | null;
-  detail: { threshold?: number; priorRefunded?: number; amount?: number } | null;
+  detail: PolicyDetail | null;
   note: string | null;
   createdAt: string;
 }

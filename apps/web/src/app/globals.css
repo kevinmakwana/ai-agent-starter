@@ -125,6 +125,8 @@ pre { margin: 6px 0 0; padding: 7px 9px; background: var(--code); border-radius:
 .approval dt { color: var(--muted); } .approval dd { margin: 0; font-family: var(--mono); }
 .audit { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .audit-row { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; display: grid; gap: 4px; font-size: 13px; }
+.chip.why { justify-self: start; }
+.audit-amount { font-family: var(--mono); font-weight: 600; margin-left: 4px; }
 .audit-top { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
 blockquote { margin: 0; padding: 7px 10px; border-left: 3px solid var(--line); background: var(--code); border-radius: 0 8px 8px 0; font-size: 13px; }
 blockquote.agent { border-left-color: var(--accent); }

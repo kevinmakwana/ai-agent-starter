@@ -202,13 +202,6 @@ maybe('approval audit log over HTTP (real Postgres)', () => {
       await http().get('/approvals/events').set(reviewer).expect(200);
     });
 
-    it('never puts events or policy details in the customer view of a conversation', async () => {
-      const c = await start(1);
-      await say(c, 'refund order #1');
-      const trace = (await http().get(`/conversations/${c.id}`).set(c.token).expect(200)).body;
-      expect(JSON.stringify(trace)).not.toContain('auto_approved');
-      expect(JSON.stringify(trace)).not.toContain('"events"');
-    });
   });
 
   describe('with REFUND_AUTO_APPROVE_UNDER=25', () => {
@@ -231,6 +224,23 @@ maybe('approval audit log over HTTP (real Postgres)', () => {
           detail: { threshold: 25, priorRefunded: 0, amount: 18.75 },
         }),
       ]);
+    });
+
+    it('hides the policy rule and threshold from the customer view of a conversation, not from reviewers', async () => {
+      const c = await start(2);
+      const sent = await say(c, 'refund order #12');
+      expect(sent.body.run.status).toBe('awaiting_approval');
+
+      const asCustomer = (await http().get(`/conversations/${c.id}`).set(c.token).expect(200)).body;
+      expect(asCustomer.approvals).toHaveLength(1);
+      expect(asCustomer.approvals[0]).not.toHaveProperty('policyRule');
+      expect(asCustomer.approvals[0]).not.toHaveProperty('policyDetail');
+      expect(JSON.stringify(asCustomer)).not.toContain('over_threshold');
+      expect(JSON.stringify(asCustomer)).not.toContain('"threshold"');
+      expect(JSON.stringify(sent.body)).not.toContain('"threshold"');
+
+      const asReviewer = (await http().get(`/conversations/${c.id}`).set(reviewer).expect(200)).body;
+      expect(asReviewer.approvals[0]).toMatchObject({ policyRule: 'over_threshold', policyDetail: { threshold: 25 } });
     });
 
     it('still parks a refund that would push the order to the threshold', async () => {

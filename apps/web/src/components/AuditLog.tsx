@@ -20,8 +20,8 @@ export function AuditLog({ events }: { events: ApprovalEvent[] }) {
               <time className="muted" dateTime={e.createdAt}>{new Date(e.createdAt).toLocaleString()}</time>
             </div>
             <div>
-              <b>{e.toolName === 'issue_refund' ? `Refund · order #${e.toolArgs.orderId}` : e.toolName}</b>
-              {e.toolArgs.amount != null && <span className="amount"> {usd(e.toolArgs.amount)}</span>}
+              <b>{e.toolName === 'issue_refund' ? `Refund${e.toolArgs.orderId != null ? ` · order #${e.toolArgs.orderId}` : ''}` : e.toolName}</b>
+              {e.toolArgs.amount != null && <span className="audit-amount"> {usd(e.toolArgs.amount)}</span>}
             </div>
             <div className="muted">
               {WHO[e.actorType]}{rule && ` · ${rule}`}{e.note && ` · “${e.note}”`}
