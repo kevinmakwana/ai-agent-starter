@@ -1,4 +1,4 @@
-import type { Approval, ConversationDetail, ConversationSummary, Customer } from './types';
+import type { Approval, ApprovalEvent, ConversationDetail, ConversationSummary, Customer } from './types';
 
 /** `token` = conversation access token (customers); `key` = reviewer API key (console). */
 export interface Auth { token?: string; key?: string }
@@ -36,4 +36,5 @@ export const api = {
   approvals: (auth: Auth) => call<Approval[]>('/approvals', {}, auth),
   decide: (id: string, decision: 'approve' | 'reject', note: string | undefined, auth: Auth) =>
     call<unknown>(`/approvals/${id}`, post({ decision, note: note || undefined }), auth),
+  approvalEvents: (auth: Auth) => call<ApprovalEvent[]>('/approvals/events?limit=100', {}, auth),
 };
