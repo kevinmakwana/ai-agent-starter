@@ -21,8 +21,8 @@ describe('evaluateApproval for issue_refund', () => {
   });
 
   it('compares in cents, so floating point drift cannot flip the result', () => {
-    expect(refund(0.3, 0.1, 0.41)).toMatchObject({ mode: 'auto' }); // 0.1 + 0.3 is 0.4 in cents, not 0.40000000000000002
-    expect(refund(0.2, 0.1, 0.3)).toMatchObject({ mode: 'human' }); // 0.1 + 0.2 must equal 0.3, not sit just under it
+    expect(refund(0.3, 0.1, 0.41)).toMatchObject({ mode: 'auto' }); // 10 + 30 = 40 cents, under 41
+    expect(refund(0.7, 0.1, 0.8)).toEqual({ mode: 'human', rule: 'over_threshold', detail: { threshold: 0.8, priorRefunded: 0.1, amount: 0.7 } }); // 0.1 + 0.7 is 0.7999999999999999 in floats, which would wrongly auto-approve; 80 cents is not under 80
   });
 
   it('always reviews when no threshold is set', () => {
