@@ -6,6 +6,13 @@ export const CUSTOMER_RUN_ERROR = 'Something went wrong on our side. Please try 
 export const forCaller = <R extends Run>(run: R, reviewer: boolean): R =>
   reviewer || run.error === null ? run : { ...run, error: CUSTOMER_RUN_ERROR };
 
+/** Why a human was needed (rule, threshold) is reviewer-only: customers never see the approval policy. */
+export const approvalForCaller = <A extends { policyRule?: unknown; policyDetail?: unknown }>(a: A, reviewer: boolean): A => {
+  if (reviewer) return a;
+  const { policyRule: _rule, policyDetail: _detail, ...rest } = a;
+  return rest as A;
+};
+
 export interface Usage { inputTokens: number; outputTokens: number; totalTokens: number; cachedInputTokens: number }
 
 /** Tokens billed by the model for these steps (only assistant steps that made a model call carry counts). */

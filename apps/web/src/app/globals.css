@@ -59,6 +59,9 @@ h1, h2, h3, p { margin: 0; }
 .chip.completed, .chip.approved { background: var(--accent-soft); color: var(--accent); }
 .chip.failed, .chip.rejected, .chip.step_limit, .chip.budget_exceeded { background: var(--bad-soft); color: var(--bad); }
 .chip.running { background: var(--code); color: var(--ink); }
+.chip.requested { background: var(--warn-soft); color: var(--warn); }
+.chip.auto_approved { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+.chip.expired { background: var(--code); color: var(--muted); }
 .chip.provider { border: 1px solid var(--line); background: transparent; }
 
 .new-chat { display: flex; gap: 6px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
@@ -120,6 +123,11 @@ pre { margin: 6px 0 0; padding: 7px 9px; background: var(--code); border-radius:
 .amount { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; color: var(--warn); }
 .approval dl { display: grid; grid-template-columns: auto auto; justify-content: start; gap: 2px 14px; margin: 0; font-size: 12.5px; }
 .approval dt { color: var(--muted); } .approval dd { margin: 0; font-family: var(--mono); }
+.audit { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.audit-row { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; display: grid; gap: 4px; font-size: 13px; }
+.chip.why { justify-self: start; }
+.audit-amount { font-family: var(--mono); font-weight: 600; margin-left: 4px; }
+.audit-top { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
 blockquote { margin: 0; padding: 7px 10px; border-left: 3px solid var(--line); background: var(--code); border-radius: 0 8px 8px 0; font-size: 13px; }
 blockquote.agent { border-left-color: var(--accent); }
 blockquote span { display: block; font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 700; margin-bottom: 2px; }

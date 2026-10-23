@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { describeRule } from '@/lib/policy';
 import type { Approval } from '@/lib/types';
 
 const usd = (n: number | null | undefined) => (n == null ? '—' : `$${n.toFixed(2)}`);
@@ -8,12 +9,14 @@ function Card({ a, onDecide }: { a: Approval; onDecide: (id: string, d: 'approve
   const [busy, setBusy] = useState(false);
   const decide = async (d: 'approve' | 'reject') => { setBusy(true); try { await onDecide(a.id, d, note); } finally { setBusy(false); } };
   const remaining = a.orderTotal == null ? null : a.orderTotal - a.orderRefunded;
+  const why = a.status === 'pending_approval' ? describeRule(a.policyRule ?? null, a.policyDetail ?? null) : null;
   return (
     <article className="approval">
       <div className="approval-top">
         <div><b>Refund · order #{a.toolArgs.orderId}</b><div className="muted">{a.customerName} · {a.customerEmail}</div></div>
         <div className="amount">{usd(a.toolArgs.amount)}</div>
       </div>
+      {why && <div className="chip warn why">{why}</div>}
       <dl>
         <dt>Order total</dt><dd>{usd(a.orderTotal)}</dd>
         <dt>Already refunded</dt><dd>{usd(a.orderRefunded)}</dd>

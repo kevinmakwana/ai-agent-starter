@@ -10,7 +10,7 @@ import { APP_CONFIG, PG_POOL } from '../tokens';
 import { ConversationAccessGuard } from './conversation-access.guard';
 import { CreateConversationDto, SendMessageDto } from './dto';
 import { limited } from './rate-limit';
-import { forCaller, sumUsage } from './run-view';
+import { approvalForCaller, forCaller, sumUsage } from './run-view';
 import { isReviewer, ReviewerGuard } from './reviewer.guard';
 
 @Controller()
@@ -68,7 +68,7 @@ export class ConversationsController {
         return { ...forCaller(run, this.isReviewer(req)), usage: sumUsage(runSteps), steps: runSteps };
       }),
       usage: { ...sumUsage(steps), budget: this.cfg.conversationTokenBudget },
-      approvals,
+      approvals: approvals.map((a) => approvalForCaller(a, this.isReviewer(req))),
     };
   }
 

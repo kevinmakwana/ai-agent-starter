@@ -93,3 +93,15 @@ describe('basic numeric config', () => {
     expect(() => loadConfig({ MOCK_DELAY_MS: '-1' })).toThrow('MOCK_DELAY_MS');
   });
 });
+
+describe('approval policy config', () => {
+  it('always reviews by default, accepts dollars and cents, and rejects junk', () => {
+    expect(loadConfig({}).approvalPolicy).toEqual({ refundAutoApproveUnder: 0 });
+    expect(loadConfig({ REFUND_AUTO_APPROVE_UNDER: '' }).approvalPolicy.refundAutoApproveUnder).toBe(0);
+    expect(loadConfig({ REFUND_AUTO_APPROVE_UNDER: '25' }).approvalPolicy.refundAutoApproveUnder).toBe(25);
+    expect(loadConfig({ REFUND_AUTO_APPROVE_UNDER: '24.99' }).approvalPolicy.refundAutoApproveUnder).toBe(24.99);
+    for (const bad of ['-1', 'lots', '10.005', 'Infinity', 'NaN']) {
+      expect(() => loadConfig({ REFUND_AUTO_APPROVE_UNDER: bad })).toThrow('REFUND_AUTO_APPROVE_UNDER');
+    }
+  });
+});

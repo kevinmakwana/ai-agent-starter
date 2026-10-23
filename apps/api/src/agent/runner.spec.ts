@@ -12,6 +12,11 @@ function setup(provider: ChatProvider = new MockProvider(), maxSteps = 8, tokenB
   return { shop, store, conv, runner: new AgentRunner({ provider, shop, store, maxSteps, tokenBudget, maxContextTokens }) };
 }
 
+const scripted = (calls: Completion[]): ChatProvider => {
+  let i = 0;
+  return { name: 'scripted', complete: async () => calls[Math.min(i++, calls.length - 1)] };
+};
+
 const toolSteps = (store: MemoryStore) => store.steps.filter((s) => s.toolName).map((s) => `${s.role}:${s.toolName}`);
 
 describe('agent loop with the mock provider', () => {
@@ -121,11 +126,6 @@ describe('run metadata', () => {
 });
 
 describe('agent loop safety', () => {
-  const scripted = (calls: Completion[]): ChatProvider => {
-    let i = 0;
-    return { name: 'scripted', complete: async () => calls[Math.min(i++, calls.length - 1)] };
-  };
-
   it('refuses a second message while a run is still in flight, then accepts one after it finishes', async () => {
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));
@@ -322,11 +322,6 @@ describe('conversation context', () => {
 });
 
 describe('failures around a run', () => {
-  const scripted = (calls: Completion[]): ChatProvider => {
-    let i = 0;
-    return { name: 'scripted', complete: async () => calls[Math.min(i++, calls.length - 1)] };
-  };
-
   it('does not leave the conversation blocked when the first user message cannot be saved', async () => {
     const { runner, store, conv } = setup();
     const addStep = store.addStep.bind(store);
@@ -408,5 +403,180 @@ describe('tool arguments the database cannot store', () => {
     expect((await runner.handleUserMessage(conv, 'open a ticket')).status).toBe('completed');
     expect(store.steps.find((x) => x.role === 'tool')?.result).toMatchObject({ code: 'INVALID_ARGUMENTS' });
     expect(shop.tickets).toHaveLength(0);
+  });
+});
+
+describe('approval policy', () => {
+  const build = (refundAutoApproveUnder: number) => {
+    const shop = new MemoryShop();
+    const store = new MemoryStore();
+    const runner = new AgentRunner({ provider: new MockProvider(), shop, store, approvalPolicy: { refundAutoApproveUnder } });
+    return { shop, store, runner, newConversation: (customerId = 1) => store.addConversation(customerId) };
+  };
+
+  it('refunds under the threshold without a reviewer, and logs the policy decision', async () => {
+    const { runner, store, shop, newConversation } = build(100);
+    const run = await runner.handleUserMessage(newConversation(), 'Order #1 arrived damaged, please refund it');
+
+    expect(run.status).toBe('completed');
+    expect(store.actions.size).toBe(0); // nothing was parked
+    expect(shop.refunds).toEqual([expect.objectContaining({ orderId: 1, amount: 50, actionId: undefined })]);
+    expect(store.steps.at(-1)?.content).toContain('approved and issued');
+    expect(store.events).toEqual([
+      expect.objectContaining({
+        kind: 'auto_approved', actorType: 'policy', actionId: null, toolName: 'issue_refund', toolArgs: expect.objectContaining({ orderId: 1, amount: 50 }),
+        rule: 'under_threshold', detail: { threshold: 100, priorRefunded: 0, amount: 50 },
+      }),
+    ]);
+  });
+
+  it('parks a refund of exactly the threshold and says why', async () => {
+    const { runner, store, shop, newConversation } = build(50);
+    const run = await runner.handleUserMessage(newConversation(), 'refund order #1');
+
+    expect(run.status).toBe('awaiting_approval');
+    expect(shop.refunds).toHaveLength(0);
+    expect(store.events).toEqual([
+      expect.objectContaining({ kind: 'requested', actorType: 'policy', rule: 'over_threshold', detail: { threshold: 50, priorRefunded: 0, amount: 50 } }),
+    ]);
+  });
+
+  it('keeps asking a human for every refund when no threshold is set', async () => {
+    const { runner, store, newConversation } = build(0);
+    const run = await runner.handleUserMessage(newConversation(), 'refund order #1 $1');
+    expect(run.status).toBe('awaiting_approval');
+    expect(store.events).toEqual([expect.objectContaining({ kind: 'requested', rule: 'always_review' })]);
+  });
+
+  it('counts earlier refunds on the order, so a big refund cannot be split into small ones', async () => {
+    const { runner, store, shop, newConversation } = build(40);
+    shop.refunds.push({ id: 1, orderId: 1, amount: 30, reason: 'earlier' });
+
+    const big = await runner.handleUserMessage(newConversation(), 'refund order #1 $15'); // 30 + 15 = 45, not under 40
+    expect(big.status).toBe('awaiting_approval');
+
+    const small = await runner.handleUserMessage(newConversation(), 'refund order #1 $5'); // 30 + 5 = 35, under 40
+    expect(small.status).toBe('completed');
+    expect(shop.refunds.map((r) => r.amount)).toEqual([30, 5]);
+    expect(store.events.map((e) => e.kind)).toEqual(['requested', 'auto_approved']);
+  });
+
+  it('writes the audit event before the refund runs', async () => {
+    const { runner, store, shop, newConversation } = build(100);
+    const seen: string[][] = [];
+    const createRefund = shop.createRefund.bind(shop);
+    shop.createRefund = async (input) => {
+      seen.push(store.events.map((e) => e.kind));
+      return createRefund(input);
+    };
+    await runner.handleUserMessage(newConversation(), 'refund order #1');
+    expect(seen).toEqual([['auto_approved']]);
+  });
+
+  it('does not refund, and fails the run, when the audit event cannot be written', async () => {
+    const { runner, store, shop, newConversation } = build(100);
+    store.addApprovalEvent = async () => { throw new Error('audit down'); };
+
+    await expect(runner.handleUserMessage(newConversation(), 'refund order #1')).rejects.toThrow('audit down');
+    expect(shop.refunds).toHaveLength(0);
+    expect([...store.runs.values()][0].status).toBe('failed');
+  });
+
+  it('still applies the guardrails to a call the policy would auto-approve', async () => {
+    const { runner, store, shop, newConversation } = build(1000);
+
+    const over = await runner.handleUserMessage(newConversation(), 'refund order #1 for $500');
+    expect(over.status).toBe('completed');
+    expect(store.steps.find((s) => s.toolName === 'issue_refund' && s.role === 'tool')?.result).toMatchObject({ code: 'OVER_REFUND' });
+
+    const crossConv = newConversation();
+    const cross = await runner.handleUserMessage(crossConv, 'refund order #2'); // belongs to customer 2
+    expect(cross.status).toBe('completed');
+    expect(store.steps.find((s) => s.role === 'tool' && s.toolName === 'get_order' && s.conversationId === crossConv.id)?.result)
+      .toMatchObject({ code: 'CROSS_CUSTOMER' });
+
+    expect(shop.refunds).toHaveLength(0);
+    expect(store.events).toEqual([]); // nothing was decided, so nothing is logged
+  });
+});
+
+describe('approval policy with scripted model calls', () => {
+  const build = (provider: ChatProvider, refundAutoApproveUnder: number) => {
+    const shop = new MemoryShop();
+    const store = new MemoryStore();
+    const runner = new AgentRunner({ provider, shop, store, approvalPolicy: { refundAutoApproveUnder } });
+    return { shop, store, runner, conv: store.addConversation(1) };
+  };
+
+  it("refuses issue_refund on another customer's order even with auto-approval on: no event, no refund", async () => {
+    const { runner, store, shop, conv } = build(
+      scripted([
+        { toolCalls: [{ id: 'r1', name: 'issue_refund', args: { orderId: 2, amount: 5, reason: 'not mine' } }] },
+        { text: 'done', toolCalls: [] },
+      ]),
+      100,
+    );
+    const run = await runner.handleUserMessage(conv, 'refund order #2');
+
+    expect(run.status).toBe('completed');
+    expect(store.steps.find((s) => s.role === 'tool' && s.toolName === 'issue_refund')?.result).toMatchObject({ code: 'CROSS_CUSTOMER' });
+    expect(store.events).toEqual([]);
+    expect(store.actions.size).toBe(0);
+    expect(shop.refunds).toHaveLength(0);
+  });
+
+  it('counts refunds made earlier in the same turn: two $10 refunds auto-approve under $25, the third is parked', async () => {
+    const refund = (id: string) => ({ id, name: 'issue_refund', args: { orderId: 1, amount: 10, reason: 'damaged item' } });
+    const { runner, store, shop, conv } = build(
+      scripted([{ toolCalls: [refund('r1'), refund('r2'), refund('r3')] }, { text: 'ok', toolCalls: [] }]),
+      25,
+    );
+    const run = await runner.handleUserMessage(conv, 'refund order #1 three times');
+
+    expect(run.status).toBe('awaiting_approval');
+    expect(shop.refunds.map((r) => r.amount)).toEqual([10, 10]); // $20 refunded, the third did not run
+    expect([...store.actions.values()]).toEqual([
+      expect.objectContaining({ toolCallId: 'r3', status: 'pending_approval', toolArgs: expect.objectContaining({ amount: 10 }) }),
+    ]);
+    expect(store.events.map((e) => [e.kind, e.rule, e.detail])).toEqual([
+      ['auto_approved', 'under_threshold', { threshold: 25, priorRefunded: 0, amount: 10 }],
+      ['auto_approved', 'under_threshold', { threshold: 25, priorRefunded: 10, amount: 10 }],
+      ['requested', 'over_threshold', { threshold: 25, priorRefunded: 20, amount: 10 }],
+    ]);
+  });
+});
+
+describe('audit events for human decisions', () => {
+  it('logs requested, then the reviewer decision with its note', async () => {
+    const { runner, store, conv } = setup();
+    await runner.handleUserMessage(conv, 'refund order #1');
+    const [action] = [...store.actions.values()];
+    await runner.decide(action.id, 'approve', 'Looks legitimate');
+
+    expect(store.events.map((e) => [e.kind, e.actorType])).toEqual([['requested', 'policy'], ['approved', 'reviewer']]);
+    expect(store.events[1]).toMatchObject({ actionId: action.id, note: 'Looks legitimate', toolName: 'issue_refund' });
+  });
+
+  it('logs a rejection as rejected, and a system decision as expired', async () => {
+    const { runner, store, conv } = setup();
+    await runner.handleUserMessage(conv, 'refund order #1');
+    const [first] = [...store.actions.values()];
+    await runner.decide(first.id, 'reject', 'Outside policy');
+    expect(store.events.at(-1)).toMatchObject({ kind: 'rejected', actorType: 'reviewer' });
+
+    const other = store.addConversation(2);
+    await runner.handleUserMessage(other, 'refund order #2');
+    const second = [...store.actions.values()].find((a) => a.conversationId === other.id)!;
+    await runner.decide(second.id, 'reject', 'Expired: no reviewer decision within 1 minute.', 'system');
+    expect(store.events.at(-1)).toMatchObject({ kind: 'expired', actorType: 'system', actionId: second.id });
+  });
+
+  it('logs no second decision for a double click', async () => {
+    const { runner, store, conv } = setup();
+    await runner.handleUserMessage(conv, 'refund order #1');
+    const [action] = [...store.actions.values()];
+    await runner.decide(action.id, 'approve');
+    await expect(runner.decide(action.id, 'approve')).rejects.toBeInstanceOf(ConflictError);
+    expect(store.events.filter((e) => e.kind === 'approved')).toHaveLength(1);
   });
 });

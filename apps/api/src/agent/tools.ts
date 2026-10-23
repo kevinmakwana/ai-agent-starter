@@ -2,6 +2,7 @@ import Ajv from 'ajv';
 import { assertRefundable, assertSameCustomer, refundable } from './guardrails';
 import { GuardrailViolation } from './errors';
 import type { ShopRepo, ToolSpec } from './types';
+import type { ApprovalFacts } from './policy';
 
 export interface ToolContext {
   /** The customer this conversation is bound to. Never taken from model output. */
@@ -13,10 +14,10 @@ export interface ToolDef {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
-  /** Risky tools never run inline: they are parked as pending_approval actions. */
+  /** Risky tools are parked as pending_approval actions unless the approval policy auto-approves the call, in which case it runs inline. */
   risky?: boolean;
-  /** Policy checks run before a risky call is parked (and again when executing). */
-  preflight?: (ctx: ToolContext, args: any) => Promise<void>;
+  /** Policy checks run before a risky call is parked (createRefund re-checks when it executes). Returns what the approval policy should weigh. */
+  preflight?: (ctx: ToolContext, args: any) => Promise<ApprovalFacts | void>;
   execute: (ctx: ToolContext, args: any) => Promise<unknown>;
 }
 
@@ -90,7 +91,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: 'issue_refund',
     description:
-      'Request a refund for an order. RISKY: this does not refund immediately; it is queued for human approval. ' +
+      'Request a refund for an order. RISKY: it either issues the refund immediately or queues it for a human reviewer; the result says which. ' +
       'The amount may not exceed the order total minus earlier refunds.',
     risky: true,
     inputSchema: {
@@ -107,6 +108,7 @@ export const TOOLS: ToolDef[] = [
       const order = await loadOwnedOrder(ctx, orderId);
       const priorRefunded = await ctx.shop.totalRefunded(orderId);
       assertRefundable({ amount, orderTotal: order.total, priorRefunded, status: order.status });
+      return { priorRefunded };
     },
     async execute(ctx, args: { orderId: number; amount: number; reason: string; actionId?: string }) {
       // createRefund re-runs ownership + amount checks inside a row-locking transaction.

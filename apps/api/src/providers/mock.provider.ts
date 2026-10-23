@@ -68,7 +68,7 @@ function plan(messages: ChatMessage[]): Completion {
         'issue_refund',
         { orderId, amount: refund, reason: text.replace(/\s+/g, ' ').trim().slice(0, 300) },
         `Order #${orderId} is ${order.status} (total ${money(order.total)}). ` +
-          `Refunds need human approval, so I'm submitting a request for ${money(refund)}.`,
+          `Refunds may need human approval, so I'm submitting a request for ${money(refund)}.`,
       );
     }
     const r = last!.result;
@@ -103,7 +103,7 @@ function plan(messages: ChatMessage[]): Completion {
 
   return say(
     "Hi! I'm the Acme Shop support agent. I can look up your orders, open a ticket, or request a refund " +
-      '(a human reviews refunds). Try "Show my recent orders" or "Refund order #1, it arrived damaged".',
+      '(a human may review refunds). Try "Show my recent orders" or "Refund order #1, it arrived damaged".',
   );
 }
 

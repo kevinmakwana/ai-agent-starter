@@ -1,5 +1,6 @@
 import { ConflictError, GuardrailViolation, NotFoundError, UpstreamLlmError } from './errors';
 import { buildMessages } from './context';
+import { evaluateApproval, type ApprovalPolicyConfig } from './policy';
 import { promptVersion } from './prompt';
 import { toolByName, toolSpecs, validateToolInput, type ToolContext } from './tools';
 import type {
@@ -7,6 +8,7 @@ import type {
   AgentStore,
   ChatProvider,
   Conversation,
+  DecisionAudit,
   Run,
   ShopRepo,
   NewStep,
@@ -23,25 +25,31 @@ export interface RunnerDeps {
   tokenBudget?: number;
   /** Rough cap on the history sent to the model; older turns are left out (the stored trace is untouched). Unset = all. */
   maxContextTokens?: number;
+  /** Which risky calls skip human review. Default: none, every risky call waits for a reviewer. */
+  approvalPolicy?: ApprovalPolicyConfig;
 }
 
-type Outcome = { kind: 'result'; result: unknown } | { kind: 'pending'; reasoning: string };
+type Outcome =
+  | { kind: 'result'; result: unknown }
+  | { kind: 'pending'; reasoning: string; rule: string; detail: Record<string, unknown> };
 
 const guardrailResult = (e: GuardrailViolation) => ({ error: e.message, code: e.code });
 
 /**
  * The whole agent: call the model, validate + guard each tool call, execute safe tools,
- * park risky ones for human approval, repeat until the model answers or the step budget ends.
+ * park risky ones for human approval unless the approval policy lets them run, repeat until the model answers or the step budget ends.
  */
 export class AgentRunner {
   private readonly maxSteps: number;
   private readonly tokenBudget: number;
   private readonly maxContextTokens: number;
+  private readonly policy: ApprovalPolicyConfig;
 
   constructor(private readonly deps: RunnerDeps) {
     this.maxSteps = deps.maxSteps ?? 8;
     this.tokenBudget = deps.tokenBudget ?? Infinity;
     this.maxContextTokens = deps.maxContextTokens ?? Infinity;
+    this.policy = deps.approvalPolicy ?? { refundAutoApproveUnder: 0 };
   }
 
   /** Starts a run for a new user message. Resolves when the run completes or pauses for approval. */
@@ -61,11 +69,20 @@ export class AgentRunner {
     return this.loop(run, conv);
   }
 
-  /** Applies a reviewer's decision to a parked action and resumes the paused run. */
-  async decide(actionId: string, decision: 'approve' | 'reject', note?: string): Promise<{ action: Action; run: Run }> {
+  /**
+   * Applies a decision to a parked action and resumes the paused run. `actor` is 'system' only for the expiry
+   * sweep, which is logged as `expired` rather than as a reviewer's rejection.
+   */
+  async decide(
+    actionId: string, decision: 'approve' | 'reject', note?: string, actor: 'reviewer' | 'system' = 'reviewer',
+  ): Promise<{ action: Action; run: Run }> {
     const { store } = this.deps;
     if (!(await store.getAction(actionId))) throw new NotFoundError(`Approval ${actionId} not found`);
-    const action = await store.decideAction(actionId, decision === 'approve' ? 'approved' : 'rejected', note);
+    const audit: DecisionAudit = {
+      kind: actor === 'system' ? 'expired' : decision === 'approve' ? 'approved' : 'rejected',
+      actorType: actor,
+    };
+    const action = await store.decideAction(actionId, decision === 'approve' ? 'approved' : 'rejected', note, audit);
     if (!action) throw new ConflictError('This approval has already been decided');
 
     return this.complete(action, decision, note);
@@ -197,11 +214,12 @@ export class AgentRunner {
 
         for (const [i, call] of completion.toolCalls.entries()) {
           const t0 = Date.now();
-          const outcome = await this.execute(conv, call, completion.text ?? '');
+          const outcome = await this.execute(conv, run.id, call, completion.text ?? '');
           if (outcome.kind === 'pending') {
             await store.createAction({
               runId: run.id, conversationId: conv.id, toolName: call.name,
               toolArgs: call.args as Record<string, unknown>, toolCallId: call.id, reasoning: outcome.reasoning,
+              policy: { rule: outcome.rule, detail: outcome.detail },
             });
             for (const skipped of completion.toolCalls.slice(i + 1)) {
               await addStep({
@@ -237,8 +255,8 @@ export class AgentRunner {
     return inputTokens + outputTokens >= this.tokenBudget;
   }
 
-  /** Unknown tool -> invalid args -> guardrails -> (park | execute). Failures become tool results, not exceptions. */
-  private async execute(conv: Conversation, call: ToolCall, thought: string): Promise<Outcome> {
+  /** Unknown tool -> invalid args -> guardrails -> approval policy -> (park | execute). Failures become tool results, not exceptions. */
+  private async execute(conv: Conversation, runId: string, call: ToolCall, thought: string): Promise<Outcome> {
     const tool = toolByName(call.name);
     if (!tool) return { kind: 'result', result: { error: `Unknown tool "${call.name}"`, code: 'UNKNOWN_TOOL' } };
 
@@ -249,9 +267,21 @@ export class AgentRunner {
     const ctx = this.ctx(conv);
     try {
       if (tool.risky) {
-        await tool.preflight?.(ctx, call.args);
+        const facts = (await tool.preflight?.(ctx, call.args)) ?? {};
+        const decision = evaluateApproval(call.name, call.args, facts, this.policy);
+        if (decision.mode === 'auto') {
+          // The decision is on record before anything happens: if it cannot be written, the tool does not run.
+          await this.deps.store.addApprovalEvent({
+            kind: 'auto_approved', runId, conversationId: conv.id, actorType: 'policy', toolName: call.name,
+            toolArgs: call.args as Record<string, unknown>, rule: decision.rule, detail: decision.detail,
+          });
+          return { kind: 'result', result: await tool.execute(ctx, call.args) };
+        }
         const reason = (call.args as { reason?: string }).reason;
-        return { kind: 'pending', reasoning: thought || `The agent requested ${call.name}${reason ? `: ${reason}` : ''}` };
+        return {
+          kind: 'pending', rule: decision.rule, detail: decision.detail,
+          reasoning: thought || `The agent requested ${call.name}${reason ? `: ${reason}` : ''}`,
+        };
       }
       return { kind: 'result', result: await tool.execute(ctx, call.args) };
     } catch (e) {

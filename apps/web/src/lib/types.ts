@@ -22,6 +22,8 @@ export interface Run {
   provider: string | null; model: string | null; promptVersion: string | null;
 }
 
+export interface PolicyDetail { threshold?: number; priorRefunded?: number; amount?: number }
+
 export interface Approval {
   id: string; runId: string; conversationId: string; toolName: string;
   toolArgs: { orderId?: number; amount?: number; reason?: string };
@@ -29,6 +31,9 @@ export interface Approval {
   decisionNote: string | null; createdAt: string; decidedAt: string | null;
   customerName: string; customerEmail: string; userMessage: string | null;
   orderTotal: number | null; orderRefunded: number;
+  /** Why a human was needed (from the audit log); null for approvals created before the log existed. Absent in customer views. */
+  policyRule?: string | null;
+  policyDetail?: PolicyDetail | null;
 }
 
 export interface ConversationDetail {
@@ -36,4 +41,20 @@ export interface ConversationDetail {
   runs: Run[];
   approvals: Approval[];
   usage: Usage & { budget: number };
+}
+
+export interface ApprovalEvent {
+  id: number;
+  kind: 'requested' | 'auto_approved' | 'approved' | 'rejected' | 'expired';
+  actionId: string | null;
+  runId: string;
+  conversationId: string;
+  actorType: 'reviewer' | 'system' | 'policy';
+  actorId: string | null;
+  toolName: string;
+  toolArgs: { orderId?: number; amount?: number; reason?: string };
+  rule: string | null;
+  detail: PolicyDetail | null;
+  note: string | null;
+  createdAt: string;
 }

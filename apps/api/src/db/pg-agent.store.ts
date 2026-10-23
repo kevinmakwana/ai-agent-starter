@@ -1,12 +1,19 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type { Pool } from 'pg';
 import { ConflictError } from '../agent/errors';
-import type { Action, ActionStatus, AgentStore, Conversation, NewAction, NewStep, Run, RunMeta, Step } from '../agent/types';
+import type {
+  Action, ActionStatus, AgentStore, ApprovalEvent, Conversation, DecisionAudit, NewAction, NewApprovalEvent, NewStep, Run, RunMeta, Step,
+} from '../agent/types';
 import { camel } from './pool';
 
 const hashToken = (token: string) => createHash('sha256').update(token).digest('hex');
 
 const TERMINAL = ['completed', 'failed', 'step_limit'];
+
+/** Satisfied by both Pool and PoolClient, so an event can be written inside or outside a transaction. */
+type Db = { query: (text: string, values?: unknown[]) => Promise<{ rows: any[] }> };
+
+const MAX_EVENTS = 200;
 
 /** A 'running' run with no step activity for this long is assumed to have died with its process. */
 export const STALE_RUN_MS = 10 * 60_000;
@@ -23,6 +30,9 @@ export interface ApprovalView extends Action {
   userMessage: string | null;
   orderTotal: number | null;
   orderRefunded: number;
+  /** Why a human was needed, from the `requested` audit event. Null on approvals created before the log existed. */
+  policyRule: string | null;
+  policyDetail: Record<string, unknown> | null;
 }
 
 export class PgAgentStore implements AgentStore {
@@ -155,12 +165,27 @@ export class PgAgentStore implements AgentStore {
   }
 
   async createAction(a: NewAction): Promise<Action> {
-    const { rows } = await this.pool.query(
-      `INSERT INTO actions (run_id, conversation_id, tool_name, tool_args, tool_call_id, reasoning)
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-      [a.runId, a.conversationId, a.toolName, JSON.stringify(a.toolArgs), a.toolCallId, a.reasoning],
-    );
-    return camel<Action>(rows[0]);
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const { rows } = await client.query(
+        `INSERT INTO actions (run_id, conversation_id, tool_name, tool_args, tool_call_id, reasoning)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+        [a.runId, a.conversationId, a.toolName, JSON.stringify(a.toolArgs), a.toolCallId, a.reasoning],
+      );
+      const action = camel<Action>(rows[0]);
+      await this.insertEvent(client, {
+        kind: 'requested', actionId: action.id, runId: a.runId, conversationId: a.conversationId, actorType: 'policy',
+        toolName: a.toolName, toolArgs: a.toolArgs, rule: a.policy?.rule, detail: a.policy?.detail,
+      });
+      await client.query('COMMIT');
+      return action;
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
   }
 
   async getAction(id: string): Promise<Action | null> {
@@ -168,13 +193,60 @@ export class PgAgentStore implements AgentStore {
     return rows[0] ? camel<Action>(rows[0]) : null;
   }
 
-  async decideAction(id: string, status: 'approved' | 'rejected', note?: string): Promise<Action | null> {
-    const { rows } = await this.pool.query(
-      `UPDATE actions SET status = $2, decision_note = $3, decided_at = now()
-       WHERE id = $1 AND status = 'pending_approval' RETURNING *`,
-      [id, status, note ?? null],
+  async decideAction(
+    id: string, status: 'approved' | 'rejected', note?: string,
+    audit: DecisionAudit = { kind: status, actorType: 'reviewer' },
+  ): Promise<Action | null> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const { rows } = await client.query(
+        `UPDATE actions SET status = $2, decision_note = $3, decided_at = now()
+         WHERE id = $1 AND status = 'pending_approval' RETURNING *`,
+        [id, status, note ?? null],
+      );
+      if (!rows[0]) {
+        await client.query('ROLLBACK');
+        return null;
+      }
+      const action = camel<Action>(rows[0]);
+      await this.insertEvent(client, {
+        kind: audit.kind, actionId: id, runId: action.runId, conversationId: action.conversationId, actorType: audit.actorType,
+        toolName: action.toolName, toolArgs: action.toolArgs, note,
+      });
+      await client.query('COMMIT');
+      return action;
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+  }
+
+  private async insertEvent(db: Db, e: NewApprovalEvent): Promise<ApprovalEvent> {
+    const { rows } = await db.query(
+      `INSERT INTO approval_events (kind, action_id, run_id, conversation_id, actor_type, actor_id, tool_name, tool_args, rule, detail, note)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
+      [e.kind, e.actionId ?? null, e.runId, e.conversationId, e.actorType, e.actorId ?? null, e.toolName,
+       JSON.stringify(e.toolArgs), e.rule ?? null, e.detail ? JSON.stringify(e.detail) : null, e.note ?? null],
     );
-    return rows[0] ? camel<Action>(rows[0]) : null;
+    return camel<ApprovalEvent>(rows[0]);
+  }
+
+  addApprovalEvent(e: NewApprovalEvent): Promise<ApprovalEvent> {
+    return this.insertEvent(this.pool, e);
+  }
+
+  async listApprovalEvents(filter: { conversationId?: string; limit?: number; before?: number } = {}): Promise<ApprovalEvent[]> {
+    const limit = Math.min(Math.max(filter.limit ?? 100, 1), MAX_EVENTS);
+    const { rows } = await this.pool.query(
+      `SELECT * FROM approval_events
+       WHERE ($1::uuid IS NULL OR conversation_id = $1) AND ($2::bigint IS NULL OR id < $2)
+       ORDER BY id DESC LIMIT $3`,
+      [filter.conversationId ?? null, filter.before ?? null, limit],
+    );
+    return rows.map((r) => camel<ApprovalEvent>(r));
   }
 
   async listPendingActionsOlderThan(cutoff: Date): Promise<Action[]> {
@@ -218,7 +290,9 @@ export class PgAgentStore implements AgentStore {
       `SELECT a.*, cu.name AS customer_name, cu.email AS customer_email,
          (SELECT content FROM steps s WHERE s.run_id = a.run_id AND s.role = 'user' ORDER BY s.id LIMIT 1) AS user_message,
          o.total AS order_total,
-         COALESCE((SELECT SUM(amount) FROM refunds r WHERE r.order_id = o.id), 0) AS order_refunded
+         COALESCE((SELECT SUM(amount) FROM refunds r WHERE r.order_id = o.id), 0) AS order_refunded,
+         (SELECT e.rule FROM approval_events e WHERE e.action_id = a.id AND e.kind = 'requested' ORDER BY e.id LIMIT 1) AS policy_rule,
+         (SELECT e.detail FROM approval_events e WHERE e.action_id = a.id AND e.kind = 'requested' ORDER BY e.id LIMIT 1) AS policy_detail
        FROM actions a
        JOIN conversations c ON c.id = a.conversation_id
        JOIN customers cu ON cu.id = c.customer_id

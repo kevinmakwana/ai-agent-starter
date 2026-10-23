@@ -41,6 +41,14 @@ describe('ApprovalExpiry', () => {
     expect([...store.runs.values()].find((r) => r.conversationId === stale.conv.id)!.status).toBe('completed');
   });
 
+  it('logs an expiry as a system decision, not a reviewer rejection', async () => {
+    const { expiry, park, store } = setup();
+    const stale = await park(1, 'refund order #1', 25 * HOUR);
+    await expiry.sweep();
+    const event = store.events.find((e) => e.actionId === stale.action.id && e.kind !== 'requested');
+    expect(event).toMatchObject({ kind: 'expired', actorType: 'system', note: expect.stringContaining('Expired') });
+  });
+
   it('is idempotent: a second sweep finds nothing', async () => {
     const { expiry, park } = setup();
     await park(1, 'refund order #1', 48 * HOUR);

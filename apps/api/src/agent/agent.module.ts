@@ -23,7 +23,7 @@ import type { ChatProvider } from './types';
       inject: [CHAT_PROVIDER, PgShopRepo, PgAgentStore, APP_CONFIG],
       useFactory: (provider: ChatProvider, shop: PgShopRepo, store: PgAgentStore, cfg: AppConfig) =>
         new AgentRunner({ provider, shop, store, maxSteps: cfg.maxSteps, tokenBudget: cfg.conversationTokenBudget,
-          maxContextTokens: cfg.contextMaxTokens }),
+          maxContextTokens: cfg.contextMaxTokens, approvalPolicy: cfg.approvalPolicy }),
     },
     {
       provide: ApprovalExpiry,
