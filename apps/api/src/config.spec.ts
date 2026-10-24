@@ -105,3 +105,12 @@ describe('approval policy config', () => {
     }
   });
 });
+
+describe('stream limits config', () => {
+  it('defaults to 5 per conversation and 20 for the reviewer, and validates overrides', () => {
+    expect(loadConfig({}).streams).toEqual({ perConversation: 5, reviewer: 20 });
+    expect(loadConfig({ STREAM_MAX_PER_CONVERSATION: '2', STREAM_MAX_REVIEWER: '3' }).streams).toEqual({ perConversation: 2, reviewer: 3 });
+    expect(() => loadConfig({ STREAM_MAX_PER_CONVERSATION: '0' })).toThrow('STREAM_MAX_PER_CONVERSATION');
+    expect(() => loadConfig({ STREAM_MAX_REVIEWER: 'many' })).toThrow('STREAM_MAX_REVIEWER');
+  });
+});
