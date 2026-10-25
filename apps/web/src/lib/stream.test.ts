@@ -55,9 +55,10 @@ function setup(options: Parameters<typeof openStream>[3] & object = {}, statuses
   return { ...fake, statusLog, messages, fatals, close };
 }
 
-/** Yield to the event loop until `cond` holds; bounded by iterations rather than wall-clock time. */
-async function until(cond: () => boolean) {
-  for (let i = 0; i < 1000 && !cond(); i++) await new Promise((resolve) => setImmediate(resolve));
+/** Poll until `cond` holds, failing only after a generous wall-clock deadline so slow or fast machines behave the same. */
+async function until(cond: () => boolean, timeoutMs = 2000) {
+  const deadline = Date.now() + timeoutMs;
+  while (!cond() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 1));
   assert.ok(cond(), 'condition was not reached');
 }
 
