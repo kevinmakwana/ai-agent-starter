@@ -5,6 +5,7 @@ import { Chat } from '@/components/Chat';
 import { ConversationList } from '@/components/ConversationList';
 import { TopBar } from '@/components/TopBar';
 import { api } from '@/lib/api';
+import { useEventStream } from '@/lib/useEventStream';
 import { loadChats, saveChat, type StoredConversation } from '@/lib/session';
 import type { ConversationDetail, ConversationSummary, Customer } from '@/lib/types';
 
@@ -38,11 +39,19 @@ export default function CustomerChat() {
     }
   }, [selected]);
 
+  const stream = useEventStream(
+    selected ? { path: `/conversations/${selected.id}/events`, auth: { token: selected.token } } : null,
+    () => { void refresh(); },
+  );
+
+  useEffect(() => { void refresh(); }, [refresh]);
+
+  // Poll only while the live stream is not up; a proxy that buffers SSE then degrades to the old behaviour.
   useEffect(() => {
-    refresh();
+    if (stream === 'live') return;
     const t = setInterval(refresh, sending ? 500 : 3000);
     return () => clearInterval(t);
-  }, [refresh, sending]);
+  }, [refresh, sending, stream]);
 
   const select = (id: string) => { setSelectedId(id); setDetail(null); setError(null); };
 
@@ -77,7 +86,7 @@ export default function CustomerChat() {
 
   return (
     <div className="app customer">
-      <TopBar provider={provider} mode="customer" />
+      <TopBar provider={provider} mode="customer" stream={selected ? stream : undefined} />
       <ConversationList conversations={summaries} customers={customers} selectedId={selectedId} onSelect={select} onCreate={start} />
       <Chat detail={detail} customer={customer} sending={sending} optimistic={optimistic} error={error} onSend={send} />
     </div>

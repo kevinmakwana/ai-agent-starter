@@ -63,6 +63,11 @@ h1, h2, h3, p { margin: 0; }
 .chip.auto_approved { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
 .chip.expired { background: var(--code); color: var(--muted); }
 .chip.provider { border: 1px solid var(--line); background: transparent; }
+.chip.stream { display: inline-flex; align-items: center; gap: 5px; }
+.chip.stream .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.chip.stream.live { background: var(--accent-soft); color: var(--accent); }
+.chip.stream.connecting { background: var(--warn-soft); color: var(--warn); }
+.chip.stream.down { background: var(--bad-soft); color: var(--bad); }
 
 .new-chat { display: flex; gap: 6px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
 .new-chat select { flex: 1; min-width: 0; padding: 6px 8px; border-radius: 9px; border: 1px solid var(--line); background: var(--panel); }

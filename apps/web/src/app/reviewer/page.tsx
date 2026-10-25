@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ApprovalsPanel } from '@/components/ApprovalsPanel';
 import { AuditLog } from '@/components/AuditLog';
 import { Chat } from '@/components/Chat';
@@ -8,6 +8,7 @@ import { ConversationList } from '@/components/ConversationList';
 import { TopBar } from '@/components/TopBar';
 import { TracePanel } from '@/components/TracePanel';
 import { api, ApiError } from '@/lib/api';
+import { useEventStream } from '@/lib/useEventStream';
 import { loadReviewerKey, saveReviewerKey } from '@/lib/session';
 import type { Approval, ApprovalEvent, ConversationDetail, ConversationSummary } from '@/lib/types';
 
@@ -33,14 +34,17 @@ export default function ReviewerConsole() {
 
   const locked = needsKey === null || (needsKey && !key);
 
-  const refresh = useCallback(async () => {
+  const selectedIdRef = useRef(selectedId);
+  selectedIdRef.current = selectedId;
+
+  const refresh = useCallback(async (skipDetail = false) => {
     if (locked) return;
     const auth = { key };
     try {
       const [list, apps, d, evs] = await Promise.all([
         api.conversations(auth),
         api.approvals(auth),
-        selectedId ? api.conversation(selectedId, auth) : Promise.resolve(null),
+        selectedId && !skipDetail ? api.conversation(selectedId, auth) : Promise.resolve(null),
         tab === 'audit' ? api.approvalEvents(auth) : Promise.resolve(null),
       ]);
       setConversations(list); setApprovals(apps); setError(null);
@@ -52,11 +56,22 @@ export default function ReviewerConsole() {
     }
   }, [locked, key, selectedId, tab]);
 
+  const stream = useEventStream(
+    locked ? null : { path: '/events', auth: { key } },
+    (changes) => {
+      const detailAffected = changes.some((c) => c.kind === 'resync' || c.conversationId === selectedIdRef.current);
+      void refresh(!detailAffected);
+    },
+  );
+
+  useEffect(() => { void refresh(); }, [refresh]);
+
+  // Poll only while the live stream is not up.
   useEffect(() => {
-    refresh();
-    const t = setInterval(refresh, 2000);
+    if (stream === 'live') return;
+    const t = setInterval(() => void refresh(), 2000);
     return () => clearInterval(t);
-  }, [refresh]);
+  }, [refresh, stream]);
 
   const login = (e: React.FormEvent) => {
     e.preventDefault();
@@ -87,7 +102,7 @@ export default function ReviewerConsole() {
   const pendingCount = approvals.filter((a) => a.status === 'pending_approval').length;
   return (
     <div className="app">
-      <TopBar provider={provider} mode="reviewer" />
+      <TopBar provider={provider} mode="reviewer" stream={stream} />
       <ConversationList conversations={conversations} selectedId={selectedId} onSelect={(id) => { setSelectedId(id); setDetail(null); setTab('trace'); }} />
       <Chat detail={detail} customer={undefined} sending={false} optimistic={null} error={error} readOnly onReview={() => setTab('approvals')} />
       <section className="panel side">
