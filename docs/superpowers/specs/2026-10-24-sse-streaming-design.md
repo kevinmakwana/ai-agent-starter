@@ -23,7 +23,7 @@ Success criteria:
 | Event content | Signal only (`kind` + `conversationId`). The client refetches through the existing GET endpoints, so customer/reviewer filtering stays in one place. |
 | Authentication | A `fetch`-based SSE client sending the same headers as every other call (`x-conversation-token`, `Authorization: Bearer`). Native `EventSource` and ticket / query-string credentials are not used. |
 | Event bus | Postgres `LISTEN`/`NOTIFY`, so it also works with more than one API replica. |
-| Reconnect | No event ids and no replay buffer. Every (re)connect triggers a refetch. |
+| Reconnect | No replay buffer; event ids are per-connection and unused. Every (re)connect triggers a refetch. |
 
 ## 1. Event source and bus
 
@@ -50,7 +50,7 @@ Success criteria:
   conversation's `trace` events and `resync` only. Customers never receive `approvals` or `audit` kinds.
 - `GET /events` behind `ReviewerGuard`. Streams `trace`, `approvals` and `audit` for every conversation, plus `resync`.
 - Wire format: `text/event-stream`; `event: <kind>` with `data: {"conversationId":"..."}` (`resync` carries `{}`);
-  a `: ping` comment every 15 s; `Cache-Control: no-cache, no-transform`; `X-Accel-Buffering: no`. No `id:` field.
+  a `: ping` comment every 15 s; `Cache-Control: no-cache, no-transform`; `X-Accel-Buffering: no`. No replay: Nest adds an incrementing per-connection `id:` to typed events, which the client ignores (see Notes from the installed NestJS).
 - Limits: a configurable cap on concurrent streams, per conversation and for `/events`, returning `429` over the cap.
   A closed or errored client releases its slot and its subscription.
 - The guards run before the stream opens, so a wrong or missing credential is an ordinary `401` / `404` response.
@@ -92,6 +92,14 @@ Success criteria:
   browser check is not automated.
 - At planning time, verify the NestJS version's `@Sse()` / `Observable` behaviour, `pg` `Client` notification API and
   the Next.js route-handler streaming behaviour against current documentation.
+
+## Notes from the installed NestJS
+
+- Nest defers the response headers until the first message, so the server writes a `: connected` comment immediately; without it a client would not see the response open until the first real event or ping.
+- Nest adds an incrementing `id:` to every typed event, per connection. The client ignores it, so "no `id:` field" became "no replay: ids are per-connection and unused".
+- `@Sse` supports `comment` messages, which carry the `: ping` heartbeat (and `: connected`).
+- Shutdown: `StreamBus.beforeApplicationShutdown` completes all open streams so `SIGTERM` / `docker stop` does not hang on them. Graceful shutdown can still wait up to the idle keep-alive timeout (about 4-5 s) for a pooled idle client socket.
+- Web client states: `connecting` once at the start, then `live` or `down`; the top-bar chip reads Live / Connecting / Polling. Stream caps are `STREAM_MAX_PER_CONVERSATION` (5) and `STREAM_MAX_REVIEWER` (20).
 
 ## Out of scope
 

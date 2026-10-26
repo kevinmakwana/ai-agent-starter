@@ -83,7 +83,7 @@ No UPDATE or DELETE code paths exist; rows disappear only through the conversati
   maximum 200, `before=<id>` as the only paging. Declared before `:id` so it is not captured by that route.
 - Reviewer console: a second tab, "Audit log", beside pending approvals. Each row shows time, a kind chip
   (auto-approved visually distinct), tool and amount, who decided (Reviewer / System / Policy), the rule and any
-  note. It refreshes the way the approvals list does today (SSE arrives with 4.1).
+  note. It refreshes from the live SSE stream (see the 4.1 design); the polling fallback applies when the stream is down.
 - Pending approval cards show why a human is needed (e.g. "Over the $25 auto-approve limit"), taken from the
   `requested` event's `rule` and `detail`.
 - Customer chat is unchanged: customers never see the log or the policy.
