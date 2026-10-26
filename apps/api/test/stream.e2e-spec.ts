@@ -31,6 +31,7 @@ maybe('SSE streams (e2e, real Postgres)', () => {
   let app: INestApplication;
   let pool: Pool;
   let base: string;
+  let appClosed = false; // a test that closes the app itself sets this so afterEach does not close it twice
   let open: Array<{ close: () => Promise<void> }> = [];
 
   /** Opens a stream with fetch (supertest cannot read one) and records the typed events it carries. */
@@ -39,6 +40,7 @@ maybe('SSE streams (e2e, real Postgres)', () => {
     const res = await fetch(`${base}${path}`, { headers, signal: ctrl.signal });
     const events: SseEvent[] = [];
     let reading: Promise<void> = Promise.resolve();
+    let endedByServer = false;
     if (res.ok) {
       const reader = res.body!.getReader();
       const decoder = new TextDecoder();
@@ -47,7 +49,7 @@ maybe('SSE streams (e2e, real Postgres)', () => {
         try {
           for (;;) {
             const { value, done } = await reader.read();
-            if (done) return;
+            if (done) { endedByServer = true; return; }
             buffer += decoder.decode(value, { stream: true });
             const blocks = buffer.split('\n\n');
             buffer = blocks.pop()!;
@@ -67,6 +69,7 @@ maybe('SSE streams (e2e, real Postgres)', () => {
     const stream = {
       res,
       events,
+      get endedByServer() { return endedByServer; },
       close: async () => {
         ctrl.abort();
         await reading;
@@ -110,6 +113,7 @@ maybe('SSE streams (e2e, real Postgres)', () => {
   };
 
   beforeEach(async () => {
+    appClosed = false;
     process.env.REVIEWER_API_KEY = 'rev-key';
     process.env.STREAM_MAX_PER_CONVERSATION = '2';
     process.env.DATABASE_URL = process.env.E2E_DATABASE_URL;
@@ -129,7 +133,7 @@ maybe('SSE streams (e2e, real Postgres)', () => {
     const streams = open;
     open = [];
     await Promise.all(streams.map((s) => s.close()));
-    await app?.close();
+    if (!appClosed) await app?.close();
   });
 
   afterAll(() => {
@@ -290,5 +294,26 @@ maybe('SSE streams (e2e, real Postgres)', () => {
     expect(body.run.steps.at(-1)).toMatchObject({ role: 'assistant' });
 
     await waitFor(() => has(stream.events, 'trace', c.id));
+  });
+
+  it('app.close() ends open streams and resolves promptly instead of waiting for clients to leave', async () => {
+    const c = await newConversation();
+    // `connection: close` keeps fetch's pooled keep-alive sockets (kept ~4s by undici) out of the timing: the
+    // only thing that can hold the server open here is a stream that never ends.
+    const customer = await openSse(`/conversations/${c.id}/events`, { ...c.token, connection: 'close' });
+    const watcher = await openSse('/events', { ...reviewer, connection: 'close' });
+    expect([customer.res.status, watcher.res.status]).toEqual([200, 200]);
+    // the stream is flowing, not just opened
+    expect((await send(c, 'hello')).status).toBe(201);
+    await waitFor(() => has(customer.events, 'trace', c.id));
+
+    // Both streams are deliberately left open: nothing but the shutdown itself can end them.
+    const started = Date.now();
+    appClosed = true;
+    await app.close();
+    expect(Date.now() - started).toBeLessThan(2000);
+
+    // the clients saw the server end the responses (a clean end of stream, not an abort from this side)
+    await waitFor(() => customer.endedByServer && watcher.endedByServer, 1000);
   });
 });

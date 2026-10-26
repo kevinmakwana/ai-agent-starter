@@ -8,8 +8,12 @@ import type { StreamBus } from './stream-bus';
 /** A bus whose subscribers the test can inspect and drive. */
 function fakeBus() {
   const listeners = new Set<(e: AgentEvent) => void>();
-  const bus = { subscribe: (l: (e: AgentEvent) => void) => { listeners.add(l); return () => { listeners.delete(l); }; } } as unknown as StreamBus;
-  return { bus, listeners, emit: (e: AgentEvent) => listeners.forEach((l) => l(e)) };
+  const closers = new Set<() => void>();
+  const bus = {
+    subscribe: (l: (e: AgentEvent) => void) => { listeners.add(l); return () => { listeners.delete(l); }; },
+    onClosing: (cb: () => void) => { closers.add(cb); return () => { closers.delete(cb); }; },
+  } as unknown as StreamBus;
+  return { bus, listeners, closers, emit: (e: AgentEvent) => listeners.forEach((l) => l(e)), close: () => [...closers].forEach((c) => c()) };
 }
 
 const open = (over: Partial<Parameters<typeof eventStream>[0]> & { bus: StreamBus; limiter: StreamLimiter }) =>
@@ -71,6 +75,25 @@ describe('eventStream', () => {
     c.unsubscribe();
     expect(listeners.size).toBe(0);
     expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it('completes when the bus starts closing, and teardown frees the slot, listener, closer and timer', () => {
+    const { bus, listeners, closers, close } = fakeBus();
+    const limiter = new StreamLimiter();
+    let completed = false;
+    open({ bus, limiter, max: 1 }).subscribe({ complete: () => { completed = true; } });
+    expect(completed).toBe(false);
+    expect(closers.size).toBe(1);
+
+    close();
+    expect(completed).toBe(true);
+    expect(listeners.size).toBe(0);
+    expect(closers.size).toBe(0);
+    expect(jest.getTimerCount()).toBe(0);
+    // the slot is free again
+    const again = open({ bus, limiter, max: 1 }).subscribe();
+    expect(listeners.size).toBe(1);
+    again.unsubscribe();
   });
 
   it('counts caps per key', () => {

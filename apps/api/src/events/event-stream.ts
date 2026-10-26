@@ -33,8 +33,11 @@ export function eventStream(o: EventStreamOptions): Observable<MessageEvent> {
       else if (o.accept(e)) subscriber.next({ type: e.kind, data: { conversationId: e.conversationId } });
     });
     const ping = setInterval(() => subscriber.next({ comment: 'ping' }), o.pingMs);
+    // On app shutdown, end the response so the HTTP server can close; teardown below still runs.
+    const stopClosing = o.bus.onClosing(() => subscriber.complete());
     return () => {
       clearInterval(ping);
+      stopClosing();
       unsubscribe();
       release();
     };

@@ -1,4 +1,4 @@
-import type { OnApplicationShutdown, OnModuleInit } from '@nestjs/common';
+import type { BeforeApplicationShutdown, OnApplicationShutdown, OnModuleInit } from '@nestjs/common';
 import { Client } from 'pg';
 import { AGENT_EVENTS_CHANNEL, type AgentEvent, parseEvent } from './agent-events';
 
@@ -27,8 +27,9 @@ export interface StreamBusOptions {
  * reconnects with backoff and, once listening again, tells every subscriber to `resync`: events may have been
  * missed in between, and signals carry no replay.
  */
-export class StreamBus implements OnModuleInit, OnApplicationShutdown {
+export class StreamBus implements OnModuleInit, BeforeApplicationShutdown, OnApplicationShutdown {
   private readonly listeners = new Set<(e: AgentEvent) => void>();
+  private readonly closers = new Set<() => void>();
   private conn: ListenConnection | null = null;
   private timer: NodeJS.Timeout | undefined;
   private attempt = 0;
@@ -42,8 +43,29 @@ export class StreamBus implements OnModuleInit, OnApplicationShutdown {
     return () => { this.listeners.delete(listener); };
   }
 
+  /**
+   * Calls `cb` once when the app begins shutting down (immediately if it already has), so open streams can end
+   * themselves: Nest's HTTP server close waits for open connections, and an SSE response never ends on its own.
+   */
+  onClosing(cb: () => void): () => void {
+    if (this.stopped) { cb(); return () => undefined; }
+    this.closers.add(cb);
+    return () => { this.closers.delete(cb); };
+  }
+
   async onModuleInit(): Promise<void> {
     await this.open();
+  }
+
+  /** Runs before Nest closes the HTTP server, which is the moment open streams must be told to finish. */
+  beforeApplicationShutdown(): void {
+    this.stopped = true;
+    clearTimeout(this.timer);
+    const closers = [...this.closers];
+    this.closers.clear();
+    for (const close of closers) {
+      try { close(); } catch (e) { this.opts.onError?.(e); }
+    }
   }
 
   async onApplicationShutdown(): Promise<void> {

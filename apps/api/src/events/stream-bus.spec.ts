@@ -106,4 +106,30 @@ describe('StreamBus', () => {
     await new Promise((r) => setTimeout(r, 30));
     expect(opened()).toBe(1);
   });
+
+  it('tells closing listeners before the connection ends, once, and immediately if already closing', async () => {
+    const conn = new FakeConn();
+    const { bus, errors, opened } = makeBus([conn, new FakeConn()]);
+    await bus.onModuleInit();
+    const calls: string[] = [];
+    bus.onClosing(() => calls.push(`a (connection ended: ${conn.ended})`));
+    bus.onClosing(() => { throw new Error('bad closer'); });
+    const offC = bus.onClosing(() => calls.push('c'));
+    offC();
+    bus.onClosing(() => calls.push('d'));
+
+    bus.beforeApplicationShutdown();
+    expect(calls).toEqual(['a (connection ended: false)', 'd']);
+    expect(errors).toHaveLength(1);
+    bus.beforeApplicationShutdown();
+    expect(calls).toHaveLength(2);
+
+    bus.onClosing(() => calls.push('late'));
+    expect(calls.at(-1)).toBe('late');
+
+    await bus.onApplicationShutdown();
+    expect(conn.ended).toBe(true);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(opened()).toBe(1);
+  });
 });
