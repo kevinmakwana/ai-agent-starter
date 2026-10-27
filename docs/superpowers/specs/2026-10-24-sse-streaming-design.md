@@ -41,13 +41,23 @@ Success criteria:
 - If the LISTEN connection errors or ends, `StreamBus` reconnects with backoff, re-issues `LISTEN`, and then emits a
   synthetic `resync` event to every subscriber, because events may have been missed meanwhile. It stops cleanly on
   module shutdown.
+- A connection that dies silently (a NAT, load balancer or managed proxy dropping an idle flow) raises neither `error`
+  nor `end`, and the API's own `: ping` would keep browsers believing the stream is healthy. So the listener client
+  uses TCP keepalive probes from 10 s (`keepAliveInitialDelayMillis`), a 10 s `connectionTimeoutMillis` and
+  `application_name = 'agent-events-listener'`, and `StreamBus` runs a heartbeat: every 30 s (configurable through
+  the options) it runs `SELECT 1` on the listener connection with a timeout. A failed or timed-out probe is treated
+  like an `error`: the connection is dropped, the bus is marked degraded and it retries, and the reconnect emits
+  exactly one `resync`. The heartbeat timer is cleared on connection loss and on shutdown and is `unref`'d.
 - The in-memory fake store does not publish. The runner does not depend on publishing; stream behaviour is covered by
   e2e tests on the real test database.
 
 ## 2. API
 
 - `GET /conversations/:id/events` behind `ConversationAccessGuard` (customer token or reviewer key). Streams that
-  conversation's `trace` events and `resync` only. Customers never receive `approvals` or `audit` kinds.
+  conversation's `trace` events and `resync` only. Customers never receive `approvals` or `audit` kinds. The id is
+  validated as a UUID, which is case-insensitive, so it is lowercased once and that form is used for both the cap key
+  and the event filter (Postgres emits lowercase ids); otherwise each letter case would get its own cap budget and
+  only the lowercase stream would receive events.
 - `GET /events` behind `ReviewerGuard`. Streams `trace`, `approvals` and `audit` for every conversation, plus `resync`.
 - Wire format: `text/event-stream`; `event: <kind>` with `data: {"conversationId":"..."}` (`resync` carries `{}`);
   a `: ping` comment every 15 s; `Cache-Control: no-cache, no-transform`; `X-Accel-Buffering: no`. No replay: Nest adds an incrementing per-connection `id:` to typed events, which the client ignores (see Notes from the installed NestJS).
@@ -63,7 +73,7 @@ Success criteria:
 - `lib/stream.ts`: `openStream(path, headers, handlers)` reads `text/event-stream` with `fetch` and `ReadableStream`,
   parses `event:` / `data:` lines (chunks split anywhere, CRLF, multi-line `data:`, `: comments` ignored), reconnects with
   exponential backoff plus jitter (1 s to 15 s) and aborts on unmount. A 401 or 404 stops retrying and reports an error.
-- `useEventStream` hook reports `live`, `connecting` or `down`.
+- `useEventStream` hook reports `live`, `connecting` or `down`. `live` is reported when the first bytes of the body arrive, not when the response headers do, so a proxy that passes headers but buffers the body keeps the pages polling.
 - Both pages drop their `setInterval`. An event triggers a debounced (about 100 ms) refresh; every successful
   (re)connect triggers one refresh. On the reviewer page a `trace` event refreshes the selected conversation only if it
   matches; `approvals` refreshes the approvals list; `audit` refreshes the audit tab; `resync` refreshes everything.
@@ -75,7 +85,8 @@ Success criteria:
 ## 4. Testing
 
 - Unit: SSE parser (split chunks, CRLF, multi-line data, comments); backoff and stop-on-401; `StreamBus` fan-out,
-  `resync` after reconnect, unsubscribe cleanup.
+  `resync` after reconnect, unsubscribe cleanup; the listener heartbeat (a failed or hung probe reconnects with exactly
+  one `resync`, a healthy one emits nothing, none after shutdown); latest-wins and single-flight refresh helpers.
 - E2E (real test DB on port 5435): a customer stream receives `trace` when a message is sent; a stream for
   conversation A never receives B's events; wrong or missing token gives 401 and a wrong key on `/events` gives 401;
   the reviewer stream receives `approvals` and `audit` when a refund is parked and decided; a rolled-back write
@@ -95,7 +106,7 @@ Success criteria:
 
 ## Notes from the installed NestJS
 
-- Nest defers the response headers until the first message, so the server writes a `: connected` comment immediately; without it a client would not see the response open until the first real event or ping.
+- Older Nest versions deferred the response headers until the first message, which is why the server writes a `: connected` comment immediately. That no longer holds for the installed 11.2.7, where the headers are committed on the next macrotask. `: connected` is still sent; it is harmless, and gives the client its first chunk straight away, which is what the web client now waits for before reporting `live`.
 - Nest adds an incrementing `id:` to every typed event, per connection. The client ignores it, so "no `id:` field" became "no replay: ids are per-connection and unused".
 - `@Sse` supports `comment` messages, which carry the `: ping` heartbeat (and `: connected`).
 - Shutdown: `StreamBus.beforeApplicationShutdown` completes all open streams so `SIGTERM` / `docker stop` does not hang on them. Graceful shutdown can still wait up to the idle keep-alive timeout (about 4-5 s) for a pooled idle client socket.

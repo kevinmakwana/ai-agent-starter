@@ -58,7 +58,7 @@ flowchart LR
 
 ### Live updates
 
-The chat and the reviewer console update over SSE instead of polling. The store runs `pg_notify` inside the same transaction as each write, so Postgres delivers the signal only on commit. One dedicated `LISTEN` connection per API process (`StreamBus`) fans the signals out to open streams, so it works across several API replicas on the same database. The server sends a `: connected` comment on open and a `: ping` comment every 15 s, and a synthetic `resync` event if the `LISTEN` connection is lost and restored. The UI polls (chat 3 s, 500 ms while sending; console 2 s) only while the stream is not live, and a "Live / Connecting / Polling" chip in the top bar shows which mode it is in. Open streams are completed on shutdown so `SIGTERM` / `docker stop` does not hang; graceful shutdown can still wait a few seconds (the idle keep-alive timeout) for a pooled idle client socket.
+The chat and the reviewer console update over SSE instead of polling. The store's run, step, approval and audit writes run `pg_notify` inside the same transaction, so Postgres delivers the signal only on commit. Creating a conversation and the shop-side writes (refunds, tickets) do not publish on their own; the step or result write that follows them does. One dedicated `LISTEN` connection per API process (`StreamBus`) fans the signals out to open streams, so it works across several API replicas on the same database. The connection uses TCP keepalive and a connect timeout, and is probed with `SELECT 1` every 30 s, so a silently dead connection is replaced (followed by a `resync`) rather than leaving clients on a frozen UI. The server sends a `: connected` comment on open and a `: ping` comment every 15 s, and a synthetic `resync` event if the `LISTEN` connection is lost and restored. The UI polls (chat 3 s, 500 ms while sending; console 2 s) only while the stream is not live, and a "Live / Connecting / Polling" chip in the top bar shows which mode it is in. Open streams are completed on shutdown so `SIGTERM` / `docker stop` does not hang; graceful shutdown can still wait a few seconds (the idle keep-alive timeout) for a pooled idle client socket.
 
 ## Quick start
 
@@ -115,7 +115,7 @@ It asks "Where is my order #1?", validates the tool call against the real tool s
 
 🔒 = reviewer key (`Authorization: Bearer <REVIEWER_API_KEY>`). 🔑 = the conversation's `X-Conversation-Token`, or the reviewer key. Both are open when `REVIEWER_API_KEY` is unset (demo mode).
 
-Events are signals only (`{ "conversationId": "…" }`, no content): clients refetch the normal endpoints to see what changed. The client sends its credential in headers (a `fetch`-based reader, not `EventSource`, which cannot set headers), and every connect is followed by a refetch.
+Events are signals only (`{ "conversationId": "…" }`, no content; `resync` carries `{}`): clients refetch the normal endpoints to see what changed. The client sends its credential in headers (a `fetch`-based reader, not `EventSource`, which cannot set headers), and every connect is followed by a refetch.
 
 Validation uses `class-validator` with `whitelist` + `forbidNonWhitelisted` (unknown fields → `400`). Upstream LLM failures return `502` with a clear message and mark the run `failed`. A failed run's stored error is shown verbatim only to reviewers; customers get a generic message.
 
@@ -158,9 +158,11 @@ E2E_DATABASE_URL=postgres://postgres:postgres@localhost:5432/aiagent npm test   
 ```
 
 - **Unit (Jest):** tool schema validation, guardrail rules (cross-customer access and over-refund blocked), provider adapters (including real-HTTP contract tests against a local server), and the agent loop with the mock provider: *lookup → refund request → pending approval → approve → refund recorded*, plus rejection, step limit, unknown tools and provider failure.
-- **Web unit:** the SSE parser and the fetch-based stream client (status changes, reconnect with backoff, idle detection, close). `npm test` at the root runs the API suite and then the web suite (`node:test` through `tsx`, no extra test framework).
+- **Stream unit (Jest):** `StreamBus` (fan-out, reconnect with one `resync`, listener heartbeat, shutdown) and `eventStream` (filtering, cap, ping, cleanup).
+- **Web unit:** the SSE parser and the fetch-based stream client (status changes, reconnect with backoff, idle detection, close), and the refresh helpers (latest-wins, single-flight). `npm test` at the root runs the API suite and then the web suite (`node:test` through `tsx`, no extra test framework).
 - Jest runs test files one at a time (`maxWorkers: 1`) because the e2e suites share one database.
 - **E2E:** the same approval flow over HTTP against real Postgres, plus input validation, reviewer-key and conversation-token access rules, the approval-time balance re-check and the `502` mapping. **It re-seeds the target database**, so point it at a disposable one.
+- **Stream e2e:** against real Postgres, `/events` and `/conversations/:id/events` deliver `trace` / `approvals` / `audit` to the right audience only, refuse bad credentials and malformed ids, enforce the caps (including for a differently-cased id), publish nothing for a rolled-back write, send `resync` after the `LISTEN` backend is killed, and end promptly on `app.close()`.
 - CI runs typecheck, tests (with a Postgres service container) and build on every push.
 
 Regenerate the README screenshots with the stack running: `npm run screenshot` (needs `npx playwright install chromium` once).
@@ -192,6 +194,9 @@ This is a **starter, not a production service**. What is and isn't protected:
 - **Events are hints, not a log.** There is no replay and no `Last-Event-ID` (the per-connection `id:` the server adds is ignored); a client that was disconnected just refetches.
 - **No token-by-token text.** A model reply appears whole when its step is saved.
 - **Stream caps are per process**, so with several API replicas the effective cap is multiplied.
+- **There is no global cap on open streams.** Only the per-conversation and reviewer caps exist, and `POST /conversations` is unauthenticated (though throttled), so a client can open many conversations and hold a stream on each.
+- **Many tabs can queue requests on plain HTTP/1.1.** Each open tab holds one of a browser's ~6 connections per host for its stream, so with many tabs other requests may wait for a free one. HTTP/2 avoids this.
+- **The manual browser check is not automated.** The live-update UI (the top-bar chip, chat and console refresh, the polling fallback) has no browser test, so check it by hand after changing it.
 - **`LISTEN` needs a session-mode Postgres connection.** A transaction-pooling proxy such as PgBouncer in transaction mode breaks it (notifications are not delivered). Point `DATABASE_URL` at Postgres directly, or at a session-mode pool.
 
 ## Next steps
