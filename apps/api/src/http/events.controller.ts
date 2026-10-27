@@ -26,9 +26,11 @@ export class EventsController {
   @Sse('conversations/:id/events')
   @UseGuards(ConversationAccessGuard)
   conversation(@Param('id', ParseUUIDPipe) id: string): Observable<MessageEvent> {
+    // UUIDs are case-insensitive but these comparisons are not: the cap and the filter use Postgres's lowercase form.
+    const key = id.toLowerCase();
     return eventStream({
-      bus: this.bus, limiter: this.limiter, key: id, max: this.cfg.streams.perConversation, pingMs: STREAM_PING_MS,
-      accept: (e) => e.kind === 'trace' && e.conversationId === id,
+      bus: this.bus, limiter: this.limiter, key, max: this.cfg.streams.perConversation, pingMs: STREAM_PING_MS,
+      accept: (e) => e.kind === 'trace' && e.conversationId === key,
     });
   }
 

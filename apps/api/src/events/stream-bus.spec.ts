@@ -5,9 +5,15 @@ import type { AgentEvent } from './agent-events';
 class FakeConn extends EventEmitter implements ListenConnection {
   queries: string[] = [];
   ended = false;
+  /** How `SELECT 1` behaves: answers, fails, or never answers (a silently dead socket). */
+  probe: 'ok' | 'fail' | 'hang' = 'ok';
   constructor(private readonly failConnect?: Error) { super(); }
   async connect() { if (this.failConnect) throw this.failConnect; }
-  async query(sql: string) { this.queries.push(sql); }
+  async query(sql: string) {
+    this.queries.push(sql);
+    if (sql === 'SELECT 1' && this.probe === 'fail') throw new Error('connection terminated');
+    if (sql === 'SELECT 1' && this.probe === 'hang') await new Promise(() => undefined);
+  }
   async end() { if (!this.ended) { this.ended = true; this.emit('end'); } }
   notify(payload: string) { this.emit('notification', { channel: 'agent_events', payload }); }
 }
@@ -20,10 +26,10 @@ const until = async (cond: () => boolean, ms = 1000) => {
   }
 };
 
-function makeBus(conns: FakeConn[]) {
+function makeBus(conns: FakeConn[], heartbeat?: { intervalMs: number; timeoutMs: number }) {
   const errors: unknown[] = [];
   let i = 0;
-  const bus = new StreamBus({ connect: () => conns[Math.min(i++, conns.length - 1)], retryMs: { min: 1, max: 5 }, onError: (e) => errors.push(e) });
+  const bus = new StreamBus({ connect: () => conns[Math.min(i++, conns.length - 1)], retryMs: { min: 1, max: 5 }, heartbeat, onError: (e) => errors.push(e) });
   return { bus, errors, opened: () => i };
 }
 
@@ -131,5 +137,74 @@ describe('StreamBus', () => {
     expect(conn.ended).toBe(true);
     await new Promise((r) => setTimeout(r, 30));
     expect(opened()).toBe(1);
+  });
+  describe('listener heartbeat', () => {
+    const heartbeat = { intervalMs: 10, timeoutMs: 20 };
+    const probes = (c: FakeConn) => c.queries.filter((q) => q === 'SELECT 1').length;
+
+    it('probes a healthy connection repeatedly and emits nothing', async () => {
+      const conn = new FakeConn();
+      const { bus, errors, opened } = makeBus([conn, new FakeConn()], heartbeat);
+      const seen: AgentEvent[] = [];
+      bus.subscribe((e) => seen.push(e));
+      await bus.onModuleInit();
+      await until(() => probes(conn) >= 3);
+      expect(seen).toEqual([]);
+      expect(errors).toEqual([]);
+      expect(opened()).toBe(1);
+      await bus.onApplicationShutdown();
+    });
+
+    it('treats a failed probe as a lost connection: reconnects and emits exactly one resync', async () => {
+      const first = new FakeConn();
+      const second = new FakeConn();
+      const { bus, errors } = makeBus([first, second], heartbeat);
+      const seen: AgentEvent[] = [];
+      bus.subscribe((e) => seen.push(e));
+      await bus.onModuleInit();
+      first.probe = 'fail';
+
+      await until(() => seen.length > 0);
+      expect(seen).toEqual([{ kind: 'resync' }]);
+      expect(first.ended).toBe(true);
+      expect(second.queries[0]).toBe('LISTEN agent_events');
+      expect(errors).toHaveLength(1);
+      await new Promise((r) => setTimeout(r, 60));
+      expect(seen).toEqual([{ kind: 'resync' }]);
+      await bus.onApplicationShutdown();
+    });
+
+    it('treats a probe that never answers as a lost connection', async () => {
+      const first = new FakeConn();
+      const second = new FakeConn();
+      const { bus, errors } = makeBus([first, second], heartbeat);
+      const seen: AgentEvent[] = [];
+      bus.subscribe((e) => seen.push(e));
+      await bus.onModuleInit();
+      first.probe = 'hang';
+
+      await until(() => seen.length > 0);
+      expect(seen).toEqual([{ kind: 'resync' }]);
+      expect(first.ended).toBe(true);
+      expect(String((errors[0] as Error).message)).toMatch(/timed out/);
+      await bus.onApplicationShutdown();
+    });
+
+    it('stops probing after shutdown, even with a probe in flight', async () => {
+      const conn = new FakeConn();
+      const { bus, errors, opened } = makeBus([conn, new FakeConn()], heartbeat);
+      await bus.onModuleInit();
+      await until(() => probes(conn) >= 1);
+      conn.probe = 'hang';
+      await until(() => probes(conn) >= 2); // a probe is now hanging
+      bus.beforeApplicationShutdown();
+      await bus.onApplicationShutdown();
+
+      const before = probes(conn);
+      await new Promise((r) => setTimeout(r, 80)); // longer than the probe timeout and several intervals
+      expect(probes(conn)).toBe(before);
+      expect(errors).toEqual([]);
+      expect(opened()).toBe(1);
+    });
   });
 });

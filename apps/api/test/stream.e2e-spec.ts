@@ -271,7 +271,7 @@ maybe('SSE streams (e2e, real Postgres)', () => {
 
     const killed = await pool.query(
       `SELECT pg_terminate_backend(pid) AS ok FROM pg_stat_activity
-       WHERE datname = current_database() AND pid <> pg_backend_pid() AND query = 'LISTEN agent_events'`,
+       WHERE datname = current_database() AND pid <> pg_backend_pid() AND application_name = 'agent-events-listener'`,
     );
     expect(killed.rows.length).toBeGreaterThanOrEqual(1);
     expect(killed.rows.every((r) => r.ok === true)).toBe(true);
@@ -281,6 +281,59 @@ maybe('SSE streams (e2e, real Postgres)', () => {
 
     expect((await send(c, 'hello after the reconnect')).status).toBe(201);
     await waitFor(() => has(stream.events, 'trace', c.id));
+  });
+
+  it('treats the conversation id case-insensitively: one cap budget, and the stream still gets its events', async () => {
+    const c = await newConversation();
+    const lower = `/conversations/${c.id}/events`;
+    const upper = `/conversations/${c.id.toUpperCase()}/events`;
+    const first = await openSse(lower, c.token);
+    const second = await openSse(lower, c.token);
+    expect([first.res.status, second.res.status]).toEqual([200, 200]);
+    expect((await refused(upper, c.token)).status).toBe(429);
+
+    await first.close();
+    const deadline = Date.now() + 2000;
+    let shouting = await openSse(upper, c.token);
+    while (shouting.res.status !== 200) {
+      if (Date.now() > deadline) throw new Error('the slot was not freed within 2s');
+      expect(shouting.res.status).toBe(429);
+      await shouting.res.body?.cancel();
+      await new Promise((r) => setTimeout(r, 50));
+      shouting = await openSse(upper, c.token);
+    }
+    expect((await send(c, 'hello')).status).toBe(201);
+    await waitFor(() => has(shouting.events, 'trace', c.id));
+  });
+
+  it('a rolled-back write publishes nothing; a committed one does', async () => {
+    const c = await newConversation();
+    const ghost = await newConversation(2);
+    const stream = await openSse('/events', reviewer);
+    expect(stream.res.status).toBe(200);
+    await settle(stream.events); // let the creation notifications (if any) pass before counting
+    stream.events.length = 0;
+
+    const payload = (id: string) => JSON.stringify({ kind: 'trace', conversationId: id });
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('SELECT pg_notify($1, $2)', ['agent_events', payload(ghost.id)]);
+      await client.query('ROLLBACK');
+      // a committed notify is delivered (positive proof the stream is live) ...
+      await client.query('SELECT pg_notify($1, $2)', ['agent_events', payload(c.id)]);
+    } finally {
+      client.release();
+    }
+    await waitFor(() => has(stream.events, 'trace', c.id));
+    await settle(stream.events);
+    // ... and the rolled-back one never was
+    expect(has(stream.events, 'trace', ghost.id)).toBe(false);
+    expect(stream.events).toEqual([{ event: 'trace', data: { conversationId: c.id } }]);
+
+    // a real committed write still arrives afterwards
+    expect((await send(ghost, 'hello')).status).toBe(201);
+    await waitFor(() => has(stream.events, 'trace', ghost.id));
   });
 
   it('a message POST still blocks until the run is done while a stream is open', async () => {
