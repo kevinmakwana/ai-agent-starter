@@ -87,8 +87,9 @@ export function openStream(
           return;
         }
         if (res.ok && res.body) {
-          attempt = 0;
-          status('live');
+          // Headers alone prove little: a proxy can pass them and buffer the body. `live` waits for the first
+          // chunk (the server writes one the moment a stream opens).
+          let first = true;
           const parser = new SseParser();
           const decoder = new TextDecoder();
           const reader = res.body.getReader();
@@ -96,6 +97,7 @@ export function openStream(
             const { value, done } = await reader.read();
             if (done) break;
             armIdle();
+            if (first) { first = false; attempt = 0; status('live'); }
             for (const m of parser.push(decoder.decode(value, { stream: true }))) handlers.onMessage(m);
           }
         } else {

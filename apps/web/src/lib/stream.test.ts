@@ -84,10 +84,10 @@ describe('openStream', () => {
     const s = setup();
     assert.deepEqual(s.statusLog, ['connecting']);
     await until(() => s.calls.length === 1);
-    await until(() => s.statusLog.length === 2);
-    assert.deepEqual(s.statusLog, ['connecting', 'live']);
 
     s.calls[0]!.send(': connected\n\nevent: tra');
+    await until(() => s.statusLog.length === 2);
+    assert.deepEqual(s.statusLog, ['connecting', 'live']);
     s.calls[0]!.send('ce\ndata: {"conversationId":"x"}\n');
     s.calls[0]!.send('\n');
     await until(() => s.messages.length === 1);
@@ -106,12 +106,34 @@ describe('openStream', () => {
     });
   }
 
+  it('does not report live until the first chunk arrives, even though the headers did', async () => {
+    const s = setup();
+    await until(() => s.calls.length === 1);
+    await settle();
+    assert.deepEqual(s.statusLog, ['connecting']);
+    s.calls[0]!.send(': connected\n\n');
+    await until(() => s.statusLog.length === 2);
+    assert.deepEqual(s.statusLog, ['connecting', 'live']);
+    s.close();
+  });
+
+  it('a body that ends without delivering anything is never live, and is retried', async () => {
+    const s = setup();
+    await until(() => s.calls.length === 1);
+    s.calls[0]!.end();
+    await until(() => s.calls.length === 2);
+    assert.deepEqual(s.statusLog, ['connecting', 'down']);
+    s.close();
+  });
+
   it('reconnects after the server ends the stream', async () => {
     const s = setup();
     await until(() => s.calls.length === 1);
+    s.calls[0]!.send(': connected\n\n');
     await until(() => s.statusLog.length === 2);
     s.calls[0]!.end();
     await until(() => s.calls.length === 2);
+    s.calls[1]!.send(': connected\n\n');
     await until(() => s.statusLog.length === 4);
     assert.deepEqual(s.statusLog, ['connecting', 'live', 'down', 'live']);
     s.close();
@@ -120,6 +142,7 @@ describe('openStream', () => {
   it('retries after a 500 without reporting it as fatal', async () => {
     const s = setup({}, [500]);
     await until(() => s.calls.length === 2);
+    s.calls[1]!.send(': connected\n\n');
     await until(() => s.statusLog.length === 3);
     assert.deepEqual(s.statusLog, ['connecting', 'down', 'live']);
     assert.deepEqual(s.fatals, []);
@@ -130,6 +153,7 @@ describe('openStream', () => {
     const delays: number[] = [];
     const s = setup({ sleep: async (ms) => void delays.push(ms), backoff: { min: 100, max: 1000 } }, [500, 500, 200]);
     await until(() => s.calls.length === 3);
+    s.calls[2]!.send(': connected\n\n');
     await until(() => s.statusLog.at(-1) === 'live');
     s.calls[2]!.end();
     await until(() => s.calls.length === 4);
@@ -147,6 +171,8 @@ describe('openStream', () => {
 
   it('close() aborts the in-flight request and stops further status callbacks', async () => {
     const s = setup();
+    await until(() => s.calls.length === 1);
+    s.calls[0]!.send(': connected\n\n');
     await until(() => s.statusLog.length === 2);
     s.close();
     assert.equal(s.calls[0]!.init.signal?.aborted, true);

@@ -9,7 +9,7 @@ export function TopBar({ provider, mode, stream }: { provider: string; mode: 'cu
       </div>
       <div className="top-right">
         {stream && (
-          <span className={`chip stream ${stream}`} title={stream === 'live' ? 'Updates arrive instantly' : stream === 'connecting' ? 'Connecting to live updates' : 'Live updates are down; refreshing every few seconds'}>
+          <span className={`chip stream ${stream}`} title={stream === 'live' ? 'Updates arrive as they happen' : stream === 'connecting' ? 'Connecting to live updates' : 'Live updates are down; refreshing every few seconds'}>
             <span className="dot" aria-hidden /> {stream === 'live' ? 'Live' : stream === 'connecting' ? 'Connecting' : 'Polling'}
           </span>
         )}
