@@ -118,7 +118,13 @@ function plan(messages: ChatMessage[]): Completion {
     }
     if (!has('track_shipment')) return call('track_shipment', { orderId }, `Checking the shipment for order #${orderId}.`);
     const r = last!.result;
-    if (!r.shipped) return say(`Order #${orderId} has not shipped yet (it is ${r.orderStatus}).`);
+    if (!r.shipped) {
+      // a shipped or delivered order with no shipment row is a data gap, not an order that is still waiting
+      if (r.orderStatus === 'shipped' || r.orderStatus === 'delivered') {
+        return say(`No tracking information is available for order #${orderId} (it is ${r.orderStatus}).`);
+      }
+      return say(`Order #${orderId} has not shipped yet (it is ${r.orderStatus}).`);
+    }
     const latest = r.events?.at(-1);
     return say(
       `Order #${orderId} shipped with ${r.carrier} (tracking ${r.trackingNumber}): ${r.status}` +
@@ -141,7 +147,7 @@ function plan(messages: ChatMessage[]): Completion {
 
   return say(
     "Hi! I'm the Acme Shop support agent. I can look up your orders, track a shipment, open a ticket, " +
-      'or request a refund or a cancellation (a human reviews those). ' +
+      'or request a refund or a cancellation (a human may review those). ' +
       'Try "Show my recent orders", "Where is my order #1?" or "Refund order #1, it arrived damaged".',
   );
 }

@@ -18,7 +18,7 @@
 - `PgShopRepo.cancelOrder` runs in one transaction with `SELECT … FOR UPDATE` on the order row (the same lock `createRefund` takes), so a cancel and a refund on one order serialise. A replay with the same `actionId` (`orders.cancel_action_id = actionId`) returns `{ orderId, status: 'cancelled' }` without error.
 - `orders.cancel_action_id` and any other internal column are never returned to the model or the API: order queries select explicit columns `id, customer_id, status, total, items, created_at`.
 - The model-facing prompt and tool descriptions must not mention any threshold value, and must not claim a cancellation is immediate: cancellations queue for a human reviewer.
-- Customers never see policy details (existing `approvalForCaller` stripping stays); a new `orderStatus` field on approvals is reviewer-only like the rest of `GET /approvals`.
+- Customers never see policy details (existing `approvalForCaller` stripping stays); a new `orderStatus` field on approvals is reviewer-only like the rest of `GET /approvals`. **Ruling:** customers also receive `orderStatus` for their own orders (deviation accepted; ownership is enforced by the preflight check, so it is never another customer's order).
 - E2E tests run ONLY against the localhost:5435 `aiagent_test` database: `E2E_DATABASE_URL=postgres://postgres:postgres@localhost:5435/aiagent_test`. They re-seed it. Never touch other ports or other projects' containers.
 - `next build` prints a SecurityFatalError about a Next.js 16.4.0 advisory on its first run; an immediate retry passes. Do not run `next upgrade`.
 - Commit messages end with `Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>`.

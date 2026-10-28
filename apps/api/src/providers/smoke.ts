@@ -17,7 +17,7 @@ const ORDER = { order: { id: 1, status: 'shipped', total: 18.75, items: [{ name:
 export async function runSmoke(provider: ChatProvider, log: (line: string) => void = console.log): Promise<void> {
   const history: ChatMessage[] = [
     { role: 'system', content: 'You are a support agent for Acme Shop. Use tools to answer.' },
-    { role: 'user', content: 'Where is my order #1?' },
+    { role: 'user', content: 'What did I order in order #1, and has any of it been refunded?' },
   ];
 
   const first = await provider.complete(history, toolSpecs());

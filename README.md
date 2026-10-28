@@ -70,6 +70,8 @@ npm install
 npm run db:up && npm run seed && npm run dev
 ```
 
+**Upgrading an existing demo database?** Builds with `track_shipment` read a `shipments` table that older seeds did not fill. Re-run `npm run seed` once, otherwise shipped and delivered orders report "not shipped" (the seed resets the demo data).
+
 Open <http://localhost:3000> (customer chat), start a chat as *Ava Brooks* and try:
 
 1. `Show my recent orders`: a plain tool call.
@@ -97,7 +99,7 @@ They are tested against mocked `fetch` and against a local HTTP server that spea
 LLM_PROVIDER=anthropic ANTHROPIC_API_KEY=sk-ant-... npm run smoke:llm -w apps/api   # or openai
 ```
 
-It asks "Where is my order #1?", validates the tool call against the real tool schema, feeds a tool result back, and expects a plain-text answer. The second call matters most: it replays the model's own tool call, which is where history-format problems show up. The same check runs weekly (and on demand) in the **LLM smoke** GitHub Actions workflow if you add `ANTHROPIC_API_KEY` and/or `OPENAI_API_KEY` as repository secrets; a provider without a secret is skipped.
+It asks "What did I order in order #1, and has any of it been refunded?", validates the tool call against the real tool schema, feeds a tool result back, and expects a plain-text answer. The second call matters most: it replays the model's own tool call, which is where history-format problems show up. The same check runs weekly (and on demand) in the **LLM smoke** GitHub Actions workflow if you add `ANTHROPIC_API_KEY` and/or `OPENAI_API_KEY` as repository secrets; a provider without a secret is skipped.
 
 ## API
 
@@ -185,7 +187,7 @@ This is a **starter, not a production service**. What is and isn't protected:
 - **Cost controls.** Each conversation has a token budget, the history sent to the model is capped, and `GET /conversations/:id` reports `usage` per run and per conversation. Failed runs show customers a generic error; reviewers see the real one.
 - **Approvals expire.** Pending approvals are auto-rejected after `APPROVAL_TTL_MINUTES`. The sweep runs in-process every minute, so it assumes a single API instance.
 - **Cancellations are never auto-approved.** The `cancel_order` rule is `tool_requires_review`, so `REFUND_AUTO_APPROVE_UNDER` has no effect on it and every request waits for a reviewer.
-- **The new tools check ownership.** `track_shipment` and `cancel_order` load the order and refuse (`CROSS_CUSTOMER`) one that belongs to another customer, so a shipment is never returned for someone else's order. A cancellation request is also refused up front, before it is parked, if the order is not `processing` or has refunds (`NOT_CANCELLABLE`, `ALREADY_CANCELLED`, `HAS_REFUNDS`).
+- **`track_shipment` and `cancel_order` check ownership.** `track_shipment` and `cancel_order` load the order and refuse (`CROSS_CUSTOMER`) one that belongs to another customer, so a shipment is never returned for someone else's order. A cancellation request is also refused up front, before it is parked, if the order is not `processing` or has refunds (`NOT_CANCELLABLE`, `ALREADY_CANCELLED`, `HAS_REFUNDS`).
 - **Cancel and refund share the order row lock.** `cancelOrder` and `createRefund` both `SELECT … FOR UPDATE` the order and re-check ownership and state inside that transaction, so a cancel and a refund on one order cannot interleave: whichever commits second is refused (a refund on a cancelled order is `ORDER_CANCELLED`).
 - **Cancellations are replay-safe.** The approval's id is stored on the order as `cancel_action_id` (unique, and never returned to the model). Re-running an approval whose cancellation already committed, as crash recovery or a reviewer retry can, reports the cancellation again instead of failing or cancelling twice.
 - **Auto-approval is opt-in and cumulative.** With `REFUND_AUTO_APPROVE_UNDER` unset nothing is auto-approved. When set, the check counts earlier refunds on the order, so a large refund cannot be split into small ones; it does not cap refunds across a customer's different orders. The check is not atomic: two conversations of the same customer refunding the same order at the same instant can both pass it and briefly exceed the threshold, but the over-refund guard in `createRefund` still caps the total at the order total. The `auto_approved` event records the policy decision and is written before the refund runs; the refund does not run if the event cannot be written. If a guardrail inside `createRefund` then rejects the call, the log shows an auto-approval with no refund behind it.

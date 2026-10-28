@@ -210,6 +210,13 @@ describe('mock provider: cancel and track flows', () => {
     expect(lastText(store)).toBe('Order #10 has not shipped yet (it is processing).');
   });
 
+  it('says tracking is unavailable (not "not shipped") for a delivered order with no shipment row', async () => {
+    const { runner, store, shop, conv } = setup();
+    shop.shipments = shop.shipments.filter((x) => x.orderId !== 1);
+    await runner.handleUserMessage(conv, 'Where is my order #1?');
+    expect(lastText(store)).toBe('No tracking information is available for order #1 (it is delivered).');
+  });
+
   it('asks which order when tracking without an id', async () => {
     const { runner, store, conv } = withProcessing();
     await runner.handleUserMessage(conv, 'where is my package');
@@ -720,6 +727,22 @@ describe('cancel_order approval flow', () => {
     expect(store.steps.find((s) => s.role === 'tool' && s.toolName === 'cancel_order')?.result).toMatchObject({
       status: 'rejected', message: expect.stringContaining('Do not retry'),
     });
+  });
+
+  it('order changed while parked: a refund landing before approval makes the cancel refuse with HAS_REFUNDS', async () => {
+    const { runner, store, shop, conv } = build(new MockProvider());
+    const parked = await runner.handleUserMessage(conv, 'cancel order #10');
+    expect(parked.status).toBe('awaiting_approval');
+    const [action] = [...store.actions.values()];
+    shop.refunds.push({ id: 1, orderId: 10, amount: 5, reason: 'goodwill' }); // the order moves on while the request waits
+
+    const { run, action: decided } = await runner.decide(action.id, 'approve');
+
+    expect(decided.status).toBe('approved');
+    expect(store.steps.find((s) => s.role === 'tool' && s.toolName === 'cancel_order')?.result).toMatchObject({ code: 'HAS_REFUNDS' });
+    expect(await status(shop)).toBe('processing');
+    expect(run.status).toBe('completed');
+    expect(store.steps.at(-1)?.content).toMatch(/^I wasn't able to do that: /);
   });
 
   it('still parks with a huge refund auto-approve threshold: no auto_approved event', async () => {

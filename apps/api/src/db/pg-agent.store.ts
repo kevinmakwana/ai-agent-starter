@@ -298,7 +298,11 @@ export class PgAgentStore implements AgentStore {
     return rows.map((r) => camel<Action>(r));
   }
 
-  /** Approvals enriched with what a reviewer needs: who asked, what they said, and the order's money position. */
+  /** Approvals enriched with what a reviewer needs: who asked, what they said, and the order's money position.
+   * The `orders` join (and so `orderStatus`) relies on the preflight ownership check (`loadOwnedOrder`): an action only
+   * exists for an order the caller owns, so customers see these fields for their own orders only. Any new risky tool must
+   * also preflight ownership.
+   */
   async listApprovals(filter: { status?: ActionStatus; conversationId?: string } = {}): Promise<ApprovalView[]> {
     const { rows } = await this.pool.query(
       `SELECT a.*, cu.name AS customer_name, cu.email AS customer_email,
