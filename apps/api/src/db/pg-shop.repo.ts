@@ -1,8 +1,11 @@
 import type { Pool } from 'pg';
 import { GuardrailViolation } from '../agent/errors';
-import { assertRefundable, assertSameCustomer } from '../agent/guardrails';
-import type { Customer, Order, ShopRepo, Ticket } from '../agent/types';
+import { assertCancellable, assertRefundable, assertSameCustomer } from '../agent/guardrails';
+import type { Customer, Order, Shipment, ShopRepo, Ticket } from '../agent/types';
 import { camel } from './pool';
+
+// Explicit list so internal columns (cancel_action_id) never reach the model.
+const ORDER_COLUMNS = 'id, customer_id, status, total, items, created_at';
 
 export class PgShopRepo implements ShopRepo {
   constructor(private readonly pool: Pool) {}
@@ -13,12 +16,12 @@ export class PgShopRepo implements ShopRepo {
   }
 
   async listOrders(customerId: number): Promise<Order[]> {
-    const { rows } = await this.pool.query('SELECT * FROM orders WHERE customer_id = $1 ORDER BY id', [customerId]);
+    const { rows } = await this.pool.query(`SELECT ${ORDER_COLUMNS} FROM orders WHERE customer_id = $1 ORDER BY id`, [customerId]);
     return rows.map((r) => camel<Order>(r));
   }
 
   async getOrder(orderId: number): Promise<Order | null> {
-    const { rows } = await this.pool.query('SELECT * FROM orders WHERE id = $1', [orderId]);
+    const { rows } = await this.pool.query(`SELECT ${ORDER_COLUMNS} FROM orders WHERE id = $1`, [orderId]);
     return rows[0] ? camel<Order>(rows[0]) : null;
   }
 
@@ -60,6 +63,37 @@ export class PgShopRepo implements ShopRepo {
       );
       await client.query('COMMIT');
       return { refundId: ins.rows[0].id as number, refundedTotal: Math.round((prior.rows[0].total + input.amount) * 100) / 100 };
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+  }
+
+  async getShipment(orderId: number): Promise<Shipment | null> {
+    const { rows } = await this.pool.query('SELECT * FROM shipments WHERE order_id = $1', [orderId]);
+    return rows[0] ? camel<Shipment>(rows[0]) : null;
+  }
+
+  async cancelOrder(input: { customerId: number; orderId: number; actionId?: string }) {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      // The same row lock createRefund takes: a cancel and a refund on one order cannot interleave.
+      const o = await client.query('SELECT customer_id, status, cancel_action_id FROM orders WHERE id = $1 FOR UPDATE', [input.orderId]);
+      if (!o.rows[0]) throw new GuardrailViolation('NOT_FOUND', `Order #${input.orderId} was not found.`);
+      assertSameCustomer(input.customerId, o.rows[0].customer_id, `Order #${input.orderId}`);
+      if (input.actionId && o.rows[0].cancel_action_id === input.actionId) {
+        // Replay of an approval whose cancellation already committed: report it again, never fail or cancel twice.
+        await client.query('COMMIT');
+        return { orderId: input.orderId, status: 'cancelled' as const };
+      }
+      const refunded = await client.query('SELECT COALESCE(SUM(amount), 0) AS total FROM refunds WHERE order_id = $1', [input.orderId]);
+      assertCancellable({ status: o.rows[0].status, priorRefunded: refunded.rows[0].total });
+      await client.query("UPDATE orders SET status = 'cancelled', cancel_action_id = $2 WHERE id = $1", [input.orderId, input.actionId ?? null]);
+      await client.query('COMMIT');
+      return { orderId: input.orderId, status: 'cancelled' as const };
     } catch (e) {
       await client.query('ROLLBACK');
       throw e;

@@ -1,5 +1,5 @@
 import { GuardrailViolation } from './errors';
-import { assertRefundable, assertSameCustomer, refundable } from './guardrails';
+import { assertCancellable, assertRefundable, assertSameCustomer, refundable } from './guardrails';
 import { TOOLS, type ToolContext } from './tools';
 import { MemoryShop } from '../../test/fakes';
 
@@ -62,5 +62,17 @@ describe('tool-level guardrails (conversation bound to customer 1)', () => {
     const c = ctx();
     await expect(tool('issue_refund').preflight!(c, { orderId: 1, amount: 50.01, reason: 'too much' })).rejects.toMatchObject({ code: 'OVER_REFUND' });
     await expect(tool('issue_refund').execute(c, { orderId: 1, amount: 50.01, reason: 'too much' })).rejects.toMatchObject({ code: 'OVER_REFUND' });
+  });
+});
+
+describe('assertCancellable', () => {
+  it('allows a processing order with no refunds', () => {
+    expect(code(() => assertCancellable({ status: 'processing', priorRefunded: 0 }))).toBeUndefined();
+  });
+  it('refuses a cancelled order first, then shipped or delivered ones, then refunded ones', () => {
+    expect(code(() => assertCancellable({ status: 'cancelled', priorRefunded: 5 }))).toBe('ALREADY_CANCELLED');
+    expect(code(() => assertCancellable({ status: 'shipped', priorRefunded: 0 }))).toBe('NOT_CANCELLABLE');
+    expect(code(() => assertCancellable({ status: 'delivered', priorRefunded: 5 }))).toBe('NOT_CANCELLABLE');
+    expect(code(() => assertCancellable({ status: 'processing', priorRefunded: 0.01 }))).toBe('HAS_REFUNDS');
   });
 });

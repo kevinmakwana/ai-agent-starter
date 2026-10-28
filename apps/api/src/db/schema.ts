@@ -117,7 +117,19 @@ CREATE TABLE IF NOT EXISTS approval_events (
 );
 CREATE INDEX IF NOT EXISTS approval_events_conversation_idx ON approval_events (conversation_id, id);
 CREATE INDEX IF NOT EXISTS approval_events_action_idx ON approval_events (action_id);
+
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS cancel_action_id uuid;
+CREATE UNIQUE INDEX IF NOT EXISTS orders_cancel_action_uniq ON orders (cancel_action_id) WHERE cancel_action_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS shipments (
+  order_id int PRIMARY KEY REFERENCES orders(id) ON DELETE CASCADE,
+  carrier text NOT NULL,
+  tracking_number text NOT NULL,
+  status text NOT NULL CHECK (status IN ('label_created', 'in_transit', 'out_for_delivery', 'delivered')),
+  eta timestamptz,
+  events jsonb NOT NULL DEFAULT '[]'
+);
 `;
 
 export const RESET_SQL =
-  'TRUNCATE customers, orders, tickets, refunds, conversations, runs, steps, actions, approval_events RESTART IDENTITY CASCADE';
+  'TRUNCATE customers, orders, tickets, refunds, shipments, conversations, runs, steps, actions, approval_events RESTART IDENTITY CASCADE';
