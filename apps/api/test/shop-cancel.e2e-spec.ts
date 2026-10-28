@@ -95,6 +95,75 @@ maybe('cancelOrder and getShipment in the store (real Postgres)', () => {
     }
   });
 
+  describe('row lock (deterministic)', () => {
+    const settled = (p: Promise<unknown>) => {
+      const state = { done: false };
+      const tracked = p.then(() => { state.done = true; }, () => { state.done = true; });
+      return { state, tracked };
+    };
+    const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+    it('makes cancelOrder wait for a holder of the order row lock, then re-check against what the holder committed', async () => {
+      const holder = await pool.connect();
+      try {
+        await holder.query('BEGIN');
+        await holder.query('SELECT id FROM orders WHERE id = 11 FOR UPDATE');
+        const cancel = shop.cancelOrder({ customerId: 1, orderId: 11, actionId: randomUUID() });
+        const { state, tracked } = settled(cancel);
+        await wait(300);
+        expect(state.done).toBe(false);
+        // Without the lock cancelOrder would already have passed its refund check and would cancel over this refund.
+        await holder.query("INSERT INTO refunds (order_id, amount, reason) VALUES (11, 5.00, 'Goodwill')");
+        await holder.query('COMMIT');
+        await tracked;
+        expect(await rejection(cancel)).toBe('HAS_REFUNDS');
+        expect(await statusOf(11)).toBe('processing');
+      } finally {
+        await holder.query('ROLLBACK').catch(() => undefined);
+        holder.release();
+      }
+    });
+
+    it('cancels once the holder of the order row lock lets go', async () => {
+      const holder = await pool.connect();
+      try {
+        await holder.query('BEGIN');
+        await holder.query('SELECT id FROM orders WHERE id = 11 FOR UPDATE');
+        const cancel = shop.cancelOrder({ customerId: 1, orderId: 11, actionId: randomUUID() });
+        const { state, tracked } = settled(cancel);
+        await wait(300);
+        expect(state.done).toBe(false);
+        await holder.query('COMMIT');
+        await tracked;
+        await expect(cancel).resolves.toEqual({ orderId: 11, status: 'cancelled' });
+        expect(await statusOf(11)).toBe('cancelled');
+      } finally {
+        await holder.query('ROLLBACK').catch(() => undefined);
+        holder.release();
+      }
+    });
+
+    it('makes createRefund wait for the lock, and a cancel after it is refused', async () => {
+      const holder = await pool.connect();
+      try {
+        await holder.query('BEGIN');
+        await holder.query('SELECT id FROM orders WHERE id = 4 FOR UPDATE');
+        const refund = shop.createRefund({ customerId: 4, orderId: 4, amount: 1, reason: 'lock', actionId: randomUUID() });
+        const { state, tracked } = settled(refund);
+        await wait(300);
+        expect(state.done).toBe(false);
+        await holder.query('COMMIT');
+        await tracked;
+        await expect(refund).resolves.toEqual(expect.objectContaining({ refundedTotal: 1 }));
+        expect(await rejection(shop.cancelOrder({ customerId: 4, orderId: 4, actionId: randomUUID() }))).toBe('HAS_REFUNDS');
+        expect(await statusOf(4)).toBe('processing');
+      } finally {
+        await holder.query('ROLLBACK').catch(() => undefined);
+        holder.release();
+      }
+    });
+  });
+
   it('returns a shipment for every shipped or delivered order and none otherwise', async () => {
     for (let orderId = 1; orderId <= TOTAL_ORDERS; orderId++) {
       const status = await statusOf(orderId);
