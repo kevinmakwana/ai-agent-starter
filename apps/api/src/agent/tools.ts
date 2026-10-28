@@ -1,5 +1,5 @@
 import Ajv from 'ajv';
-import { assertRefundable, assertSameCustomer, refundable } from './guardrails';
+import { assertCancellable, assertRefundable, assertSameCustomer, refundable } from './guardrails';
 import { GuardrailViolation } from './errors';
 import type { ShopRepo, ToolSpec } from './types';
 import type { ApprovalFacts } from './policy';
@@ -114,6 +114,42 @@ export const TOOLS: ToolDef[] = [
       // createRefund re-runs ownership + amount checks inside a row-locking transaction.
       const { refundId, refundedTotal } = await ctx.shop.createRefund({ customerId: ctx.customerId, ...args });
       return { status: 'refunded', refundId, orderId: args.orderId, amount: args.amount, refundedTotal };
+    },
+  },
+  {
+    name: 'track_shipment',
+    description:
+      "Get the shipment status of one of this customer's orders: carrier, tracking number, status, ETA and recent events. " +
+      'An order that has not shipped yet has no shipment.',
+    inputSchema: { type: 'object', properties: { orderId: id }, required: ['orderId'], additionalProperties: false },
+    async execute(ctx, { orderId }: { orderId: number }) {
+      const order = await loadOwnedOrder(ctx, orderId);
+      const shipment = await ctx.shop.getShipment(orderId);
+      if (!shipment) return { shipped: false, orderId, orderStatus: order.status };
+      const { carrier, trackingNumber, status, eta, events } = shipment;
+      return { shipped: true, orderId, carrier, trackingNumber, status, eta, events };
+    },
+  },
+  {
+    name: 'cancel_order',
+    description:
+      'Request cancellation of an order that has not shipped yet and has no refunds. RISKY: cancellations are queued for a human reviewer; ' +
+      'the result says whether the order was cancelled or the request was declined.',
+    risky: true,
+    inputSchema: {
+      type: 'object',
+      properties: { orderId: id, reason: { type: 'string', minLength: 3, maxLength: 300 } },
+      required: ['orderId', 'reason'],
+      additionalProperties: false,
+    },
+    async preflight(ctx, { orderId }: { orderId: number }) {
+      const order = await loadOwnedOrder(ctx, orderId);
+      assertCancellable({ status: order.status, priorRefunded: await ctx.shop.totalRefunded(orderId) });
+      return {};
+    },
+    async execute(ctx, args: { orderId: number; reason: string; actionId?: string }) {
+      // cancelOrder re-runs ownership and cancellability checks inside a row-locking transaction.
+      return ctx.shop.cancelOrder({ customerId: ctx.customerId, orderId: args.orderId, actionId: args.actionId });
     },
   },
 ];

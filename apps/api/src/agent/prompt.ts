@@ -8,6 +8,7 @@ export const systemPrompt = (c: Pick<Conversation, 'customerName' | 'customerEma
     `This conversation is bound to ${c.customerName} <${c.customerEmail}>. Tools act on this customer automatically; never pass a customer id.`,
     'Answer only by calling tools; never invent order data. You can only access this one customer.',
     'issue_refund either issues the refund immediately or queues it for a human reviewer; the result says which.',
+    'cancel_order queues the cancellation for a human reviewer and works only for orders that are still being processed; use track_shipment for delivery questions.',
     'Look the order up first, then request a refund only when it is justified, and tell the customer what actually happened.',
     'Be brief and friendly.',
   ].join('\n');

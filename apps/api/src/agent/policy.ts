@@ -8,7 +8,7 @@ export interface ApprovalFacts {
   priorRefunded?: number;
 }
 
-export type ApprovalRule = 'always_review' | 'under_threshold' | 'over_threshold' | 'default';
+export type ApprovalRule = 'always_review' | 'under_threshold' | 'over_threshold' | 'tool_requires_review' | 'default';
 
 export interface ApprovalDecision {
   mode: 'auto' | 'human';
@@ -42,5 +42,6 @@ function evaluateRefund(args: unknown, facts: ApprovalFacts, config: ApprovalPol
  */
 export function evaluateApproval(toolName: string, args: unknown, facts: ApprovalFacts, config: ApprovalPolicyConfig): ApprovalDecision {
   if (toolName === 'issue_refund') return evaluateRefund(args, facts, config);
+  if (toolName === 'cancel_order') return human('tool_requires_review');
   return human('default');
 }

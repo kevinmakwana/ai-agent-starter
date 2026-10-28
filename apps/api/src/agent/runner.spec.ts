@@ -546,6 +546,75 @@ describe('approval policy with scripted model calls', () => {
   });
 });
 
+describe('cancel_order approval flow', () => {
+  const cancel = (orderId: number) => scripted([
+    { toolCalls: [{ id: 'c1', name: 'cancel_order', args: { orderId, reason: 'changed my mind' } }] },
+    { text: 'done', toolCalls: [] },
+  ]);
+  const build = (provider: ChatProvider, approvalPolicy?: { refundAutoApproveUnder: number }) => {
+    const shop = new MemoryShop();
+    shop.orders.push({ id: 10, customerId: 1, status: 'processing', total: 30, items: [], createdAt: '2026-01-05T00:00:00.000Z' });
+    const store = new MemoryStore();
+    const runner = new AgentRunner({ provider, shop, store, approvalPolicy });
+    return { shop, store, runner, conv: store.addConversation(1) };
+  };
+  const status = async (shop: MemoryShop) => (await shop.getOrder(10))?.status;
+
+  it('parks the call for a human and leaves the order alone', async () => {
+    const { runner, store, shop, conv } = build(cancel(10));
+    const run = await runner.handleUserMessage(conv, 'cancel order #10');
+
+    expect(run.status).toBe('awaiting_approval');
+    expect([...store.actions.values()]).toEqual([expect.objectContaining({ toolName: 'cancel_order', status: 'pending_approval' })]);
+    expect(store.events).toEqual([expect.objectContaining({ kind: 'requested', rule: 'tool_requires_review' })]);
+    expect(await status(shop)).toBe('processing');
+  });
+
+  it('cancels the order when a reviewer approves, and the run completes', async () => {
+    const { runner, store, shop, conv } = build(cancel(10));
+    await runner.handleUserMessage(conv, 'cancel order #10');
+    const [action] = [...store.actions.values()];
+    const { run } = await runner.decide(action.id, 'approve');
+
+    expect(await status(shop)).toBe('cancelled');
+    expect(run.status).toBe('completed');
+    expect(store.steps.find((s) => s.role === 'tool' && s.toolName === 'cancel_order')?.result).toEqual({ orderId: 10, status: 'cancelled' });
+    expect(shop.cancelActions.get(10)).toBe(action.id); // the approval's id reached execute
+  });
+
+  it('leaves the order untouched on rejection and tells the model not to retry', async () => {
+    const { runner, store, shop, conv } = build(cancel(10));
+    await runner.handleUserMessage(conv, 'cancel order #10');
+    const [action] = [...store.actions.values()];
+    await runner.decide(action.id, 'reject', 'Already packed');
+
+    expect(await status(shop)).toBe('processing');
+    expect(store.steps.find((s) => s.role === 'tool' && s.toolName === 'cancel_order')?.result).toMatchObject({
+      status: 'rejected', message: expect.stringContaining('Do not retry'),
+    });
+  });
+
+  it('still parks with a huge refund auto-approve threshold: no auto_approved event', async () => {
+    const { runner, store, shop, conv } = build(cancel(10), { refundAutoApproveUnder: 1_000_000 });
+    const run = await runner.handleUserMessage(conv, 'cancel order #10');
+
+    expect(run.status).toBe('awaiting_approval');
+    expect(store.events.map((e) => e.kind)).toEqual(['requested']);
+    expect(await status(shop)).toBe('processing');
+  });
+
+  it("refuses another customer's order: a CROSS_CUSTOMER result, no action, no events", async () => {
+    const { runner, store, shop, conv } = build(cancel(2));
+    const run = await runner.handleUserMessage(conv, 'cancel order #2');
+
+    expect(run.status).toBe('completed');
+    expect(store.steps.find((s) => s.role === 'tool' && s.toolName === 'cancel_order')?.result).toMatchObject({ code: 'CROSS_CUSTOMER' });
+    expect(store.actions.size).toBe(0);
+    expect(store.events).toEqual([]);
+    expect(await shop.getOrder(2)).toMatchObject({ status: 'shipped' });
+  });
+});
+
 describe('audit events for human decisions', () => {
   it('logs requested, then the reviewer decision with its note', async () => {
     const { runner, store, conv } = setup();
