@@ -31,6 +31,8 @@ export interface Approval {
   decisionNote: string | null; createdAt: string; decidedAt: string | null;
   customerName: string; customerEmail: string; userMessage: string | null;
   orderTotal: number | null; orderRefunded: number;
+  /** The order's status right now (e.g. for judging a cancellation); null when the action names no known order. */
+  orderStatus?: string | null;
   /** Why a human was needed (from the audit log); null for approvals created before the log existed. Absent in customer views. */
   policyRule?: string | null;
   policyDetail?: PolicyDetail | null;

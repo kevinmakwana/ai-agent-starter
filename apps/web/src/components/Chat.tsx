@@ -25,7 +25,7 @@ export function Chat({ detail, customer, sending, optimistic, error, onSend, onR
       <main className="panel chat">
         <div className="placeholder">
           <h1>Acme Shop support agent</h1>
-          <p>{readOnly ? 'Select a conversation to read its transcript and trace.' : 'Start a conversation on the left. The agent answers by calling tools against Postgres; larger refunds wait for a human.'}</p>
+          <p>{readOnly ? 'Select a conversation to read its transcript and trace.' : 'Start a conversation on the left. The agent answers by calling tools against Postgres; refunds and cancellations may wait for a human.'}</p>
         </div>
       </main>
     );
@@ -59,7 +59,7 @@ export function Chat({ detail, customer, sending, optimistic, error, onSend, onR
         {sending && <div className="bubble assistant typing"><i /><i /><i /></div>}
         {paused && (
           <div className="notice warn">
-            ⏸ A refund is waiting for human approval.{' '}
+            ⏸ A request is waiting for human approval.{' '}
             {onReview ? <button className="link" onClick={onReview}>Review it →</button> : 'A reviewer will decide shortly.'}
           </div>
         )}

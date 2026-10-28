@@ -31,6 +31,8 @@ export interface ApprovalView extends Action {
   userMessage: string | null;
   orderTotal: number | null;
   orderRefunded: number;
+  /** The order's current status (a reviewer weighing a cancellation needs it); null when the action names no known order. */
+  orderStatus: string | null;
   /** Why a human was needed, from the `requested` audit event. Null on approvals created before the log existed. */
   policyRule: string | null;
   policyDetail: Record<string, unknown> | null;
@@ -301,7 +303,7 @@ export class PgAgentStore implements AgentStore {
     const { rows } = await this.pool.query(
       `SELECT a.*, cu.name AS customer_name, cu.email AS customer_email,
          (SELECT content FROM steps s WHERE s.run_id = a.run_id AND s.role = 'user' ORDER BY s.id LIMIT 1) AS user_message,
-         o.total AS order_total,
+         o.total AS order_total, o.status AS order_status,
          COALESCE((SELECT SUM(amount) FROM refunds r WHERE r.order_id = o.id), 0) AS order_refunded,
          (SELECT e.rule FROM approval_events e WHERE e.action_id = a.id AND e.kind = 'requested' ORDER BY e.id LIMIT 1) AS policy_rule,
          (SELECT e.detail FROM approval_events e WHERE e.action_id = a.id AND e.kind = 'requested' ORDER BY e.id LIMIT 1) AS policy_detail
