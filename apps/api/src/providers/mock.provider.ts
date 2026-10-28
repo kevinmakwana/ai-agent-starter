@@ -4,6 +4,9 @@ const EMAIL = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/;
 const ORDER_ID = /(?:order\s*(?:number|no\.?|id)?\s*#?\s*|#)(\d+)/i;
 const AMOUNT = /\$\s*(\d+(?:\.\d{1,2})?)|(\d+(?:\.\d{1,2})?)\s*(?:usd|dollars)/i;
 const WANTS_REFUND = /\b(refund|money back|reimburse)/i;
+// "cancelled"/"canceled" is usually a question about an order, not a request to cancel one.
+const WANTS_CANCEL = /\bcancel(?!l?ed\b)/i;
+const WANTS_TRACK = /\b(track|tracking|shipment|where(?:'s| is)(?: my)?(?: order| package| parcel)|has (?:it|my order) shipped|delivery status)/i;
 const WANTS_TICKET = /\b(ticket|complain|escalat)|speak (?:to|with) (?:a )?(?:human|person|manager)/i;
 const WANTS_ORDERS = /\b(my orders|order history|recent orders|list (?:my )?orders|what did i (?:order|buy))/i;
 
@@ -76,6 +79,25 @@ function plan(messages: ChatMessage[]): Completion {
     return say(`A reviewer declined the refund request for order #${orderId}. ${r.message ?? ''}`.trim());
   }
 
+  if (WANTS_CANCEL.test(text)) {
+    if (!orderId) {
+      if (!has('list_orders')) return call('list_orders', {}, 'Which order is this about? Let me pull up your orders.');
+      return say(`Which order would you like to cancel? ${describeOrders(last!.result)}`);
+    }
+    if (!has('get_order')) return call('get_order', { orderId }, `I'll check order #${orderId} before requesting a cancellation.`);
+    if (!has('cancel_order')) {
+      const { order } = last!.result;
+      return call(
+        'cancel_order',
+        { orderId, reason: text.replace(/\s+/g, ' ').trim().slice(0, 300) },
+        `Order #${orderId} is ${order.status}. Cancellations are reviewed by a person, so I'm submitting a request.`,
+      );
+    }
+    const r = last!.result;
+    if (r.status === 'cancelled') return say(`Order #${r.orderId} has been cancelled.`);
+    return say(`A reviewer declined the cancellation of order #${orderId}. ${r.message ?? ''}`.trim());
+  }
+
   if (WANTS_TICKET.test(text)) {
     if (!has('create_ticket')) {
       return call('create_ticket', { subject: text.slice(0, 80).trim() || 'Support request', body: text },
@@ -87,6 +109,22 @@ function plan(messages: ChatMessage[]): Completion {
   if (WANTS_ORDERS.test(text) && !orderId) {
     if (!has('list_orders')) return call('list_orders', {}, 'Let me pull up your orders.');
     return say(`Here are your orders. ${describeOrders(last!.result)}`);
+  }
+
+  if (WANTS_TRACK.test(text)) {
+    if (!orderId) {
+      if (!has('list_orders')) return call('list_orders', {}, 'Which order is this about? Let me pull up your orders.');
+      return say(`Which order would you like to track? ${describeOrders(last!.result)}`);
+    }
+    if (!has('track_shipment')) return call('track_shipment', { orderId }, `Checking the shipment for order #${orderId}.`);
+    const r = last!.result;
+    if (!r.shipped) return say(`Order #${orderId} has not shipped yet (it is ${r.orderStatus}).`);
+    const latest = r.events?.at(-1);
+    return say(
+      `Order #${orderId} shipped with ${r.carrier} (tracking ${r.trackingNumber}): ${r.status}` +
+        (r.eta ? `, ETA ${String(r.eta).slice(0, 10)}` : '') + '.' +
+        (latest ? ` Latest: ${latest.description} (${latest.location}).` : ''),
+    );
   }
 
   if (orderId) {
@@ -102,8 +140,9 @@ function plan(messages: ChatMessage[]): Completion {
   }
 
   return say(
-    "Hi! I'm the Acme Shop support agent. I can look up your orders, open a ticket, or request a refund " +
-      '(a human may review refunds). Try "Show my recent orders" or "Refund order #1, it arrived damaged".',
+    "Hi! I'm the Acme Shop support agent. I can look up your orders, track a shipment, open a ticket, " +
+      'or request a refund or a cancellation (a human reviews those). ' +
+      'Try "Show my recent orders", "Where is my order #1?" or "Refund order #1, it arrived damaged".',
   );
 }
 

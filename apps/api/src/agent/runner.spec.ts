@@ -105,6 +105,134 @@ describe('agent loop with the mock provider', () => {
   });
 });
 
+describe('mock provider: cancel and track flows', () => {
+  const withProcessing = () => {
+    const ctx = setup();
+    ctx.shop.orders.push({ id: 10, customerId: 1, status: 'processing', total: 30, items: [], createdAt: '2026-01-05T00:00:00.000Z' });
+    return ctx;
+  };
+  const lastText = (store: MemoryStore) => store.steps.at(-1)?.content;
+
+  it('cancels a processing order: lookup -> cancel_order parks -> approve -> says it was cancelled', async () => {
+    const { runner, store, shop, conv } = withProcessing();
+    const paused = await runner.handleUserMessage(conv, 'Cancel order #10, I ordered it by mistake');
+
+    expect(paused.status).toBe('awaiting_approval');
+    expect(toolSteps(store)).toEqual(['assistant:get_order', 'tool:get_order', 'assistant:cancel_order']);
+    const [action] = [...store.actions.values()];
+    expect(action).toMatchObject({
+      toolName: 'cancel_order', status: 'pending_approval',
+      toolArgs: { orderId: 10, reason: 'Cancel order #10, I ordered it by mistake' },
+    });
+    expect(action.reasoning).toContain('reviewed');
+    expect((await shop.getOrder(10))?.status).toBe('processing');
+
+    const { run } = await runner.decide(action.id, 'approve');
+    expect(run.status).toBe('completed');
+    expect((await shop.getOrder(10))?.status).toBe('cancelled');
+    expect(lastText(store)).toBe('Order #10 has been cancelled.');
+  });
+
+  it('truncates a long cancellation reason to 300 characters', async () => {
+    const { runner, store, conv } = withProcessing();
+    await runner.handleUserMessage(conv, `cancel order #10 ${'because '.repeat(100)}`);
+    const [action] = [...store.actions.values()];
+    expect((action.toolArgs as any).reason).toHaveLength(300);
+  });
+
+  it('tells the customer a reviewer declined, with the reviewer note when present', async () => {
+    const { runner, store, shop, conv } = withProcessing();
+    await runner.handleUserMessage(conv, 'Cancel order #10 please');
+    const [action] = [...store.actions.values()];
+    const { run } = await runner.decide(action.id, 'reject', 'Already packed');
+
+    expect(run.status).toBe('completed');
+    expect((await shop.getOrder(10))?.status).toBe('processing');
+    expect(lastText(store)).toContain('A reviewer declined the cancellation of order #10.');
+    expect(lastText(store)).toContain('Already packed');
+  });
+
+  it('declines without a note too', async () => {
+    const { runner, store, conv } = withProcessing();
+    await runner.handleUserMessage(conv, 'Cancel order #10 please');
+    const [action] = [...store.actions.values()];
+    await runner.decide(action.id, 'reject');
+    expect(lastText(store)).toContain('A reviewer declined the cancellation of order #10.');
+  });
+
+  it('asks which order when none is named', async () => {
+    const { runner, store, conv } = withProcessing();
+    const run = await runner.handleUserMessage(conv, 'Cancel my order');
+
+    expect(run.status).toBe('completed');
+    expect(toolSteps(store)).toEqual(['assistant:list_orders', 'tool:list_orders']);
+    expect(lastText(store)).toContain('Which order would you like to cancel?');
+    expect(lastText(store)).toContain('#10');
+    expect(store.actions.size).toBe(0);
+  });
+
+  it('never parks a delivered order: the guardrail answers first', async () => {
+    const { runner, store, conv } = setup();
+    const run = await runner.handleUserMessage(conv, 'Cancel order #1');
+
+    expect(run.status).toBe('completed');
+    expect(store.actions.size).toBe(0);
+    expect(lastText(store)).toMatch(/^I wasn't able to do that: /);
+  });
+
+  it('gives the refund path priority when a message mentions both refund and cancel', async () => {
+    const { runner, store, conv } = withProcessing();
+    await runner.handleUserMessage(conv, 'Cancel order #1 and refund me');
+    expect(toolSteps(store)).toEqual(['assistant:get_order', 'tool:get_order', 'assistant:issue_refund']);
+  });
+
+  it('tracks a shipped order and summarises carrier, tracking number and status', async () => {
+    const { runner, store, conv } = setup();
+    const run = await runner.handleUserMessage(conv, 'Where is my order #1?');
+
+    expect(run.status).toBe('completed');
+    expect(toolSteps(store)).toEqual(['assistant:track_shipment', 'tool:track_shipment']);
+    expect(lastText(store)).toBe(
+      'Order #1 shipped with FedEx (tracking FX900000001): delivered, ETA 2026-01-04. Latest: Delivered (Front door).',
+    );
+  });
+
+  it('answers "track order #N" the same way', async () => {
+    const { runner, store, conv } = setup();
+    await runner.handleUserMessage(conv, 'track order #1');
+    expect(toolSteps(store)).toEqual(['assistant:track_shipment', 'tool:track_shipment']);
+    expect(lastText(store)).toContain('FedEx');
+  });
+
+  it('says a not-yet-shipped order has not shipped, with its status', async () => {
+    const { runner, store, conv } = withProcessing();
+    await runner.handleUserMessage(conv, 'Where is my order #10?');
+    expect(lastText(store)).toBe('Order #10 has not shipped yet (it is processing).');
+  });
+
+  it('asks which order when tracking without an id', async () => {
+    const { runner, store, conv } = withProcessing();
+    await runner.handleUserMessage(conv, 'where is my package');
+    expect(toolSteps(store)).toEqual(['assistant:list_orders', 'tool:list_orders']);
+    expect(lastText(store)).toContain('Which order would you like to track?');
+  });
+
+  it("refuses to track another customer's order", async () => {
+    const { runner, store, conv } = setup();
+    await runner.handleUserMessage(conv, 'track order #2');
+    expect(lastText(store)).toMatch(/^I wasn't able to do that: /);
+    expect(lastText(store)).not.toContain('UPS');
+  });
+
+  it('leaves the ordinary flows alone', async () => {
+    const { runner, store, conv } = setup();
+    await runner.handleUserMessage(conv, 'Why was order #3 cancelled?');
+    expect(toolSteps(store)).toEqual(['assistant:get_order', 'tool:get_order']);
+    expect(lastText(store)).toContain('Order #3 is cancelled');
+    expect(store.actions.size).toBe(0);
+  });
+});
+
 describe('run metadata', () => {
   it('records which provider, model and prompt version produced each run, and keeps it through an approval', async () => {
     const { runner, store, conv } = setup();
