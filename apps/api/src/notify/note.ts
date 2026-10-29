@@ -6,11 +6,13 @@ const RULE = /^[a-z_]{1,40}$/;
 const positiveInt = (v: unknown): number | undefined =>
   typeof v === 'number' && Number.isSafeInteger(v) && v > 0 ? v : undefined;
 
-/** Finite and positive, rounded to cents. A value that rounds to zero is dropped. */
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/** Positive and rounded to cents. Dropped when it rounds to zero or is too large to hold exactly as cents. */
 function money(v: unknown): number | undefined {
-  if (typeof v !== 'number' || !Number.isFinite(v) || v <= 0) return undefined;
-  const cents = Math.round(v * 100) / 100;
-  return cents > 0 ? cents : undefined;
+  if (typeof v !== 'number') return undefined;
+  const cents = Math.round(v * 100);
+  return Number.isSafeInteger(cents) && cents > 0 ? cents / 100 : undefined;
 }
 
 /**
@@ -20,9 +22,11 @@ function money(v: unknown): number | undefined {
  */
 export function buildNote(row: ClaimedAction, consoleUrl: string): ApprovalNote {
   const tool = TOOL.test(row.toolName) ? row.toolName : 'unknown';
-  const orderId = positiveInt(row.toolArgs.orderId);
-  const amount = tool === 'issue_refund' ? money(row.toolArgs.amount) : undefined;
-  const rule = row.rule !== null && RULE.test(row.rule) ? row.rule : undefined;
+  // toolArgs comes from a JSON column, so do not trust its shape.
+  const args = isRecord(row.toolArgs) ? row.toolArgs : {};
+  const orderId = positiveInt(args.orderId);
+  const amount = tool === 'issue_refund' ? money(args.amount) : undefined;
+  const rule = typeof row.rule === 'string' && RULE.test(row.rule) ? row.rule : undefined;
   return {
     id: row.id,
     tool,

@@ -62,6 +62,16 @@ describe('slackText', () => {
     expect(text).not.toContain('a<b>');
   });
 
+  it('escapes & in the console URL', () => {
+    expect(slackText(note({ consoleUrl: 'https://x.example.com/a?b=1&c=2' }))).toContain('<https://x.example.com/a?b=1&amp;c=2|Open');
+  });
+
+  it('separates the parts with a plain ASCII hyphen', () => {
+    const text = slackText(note());
+    expect(text).toContain(' (rule: always_review) - <');
+    expect(text).not.toContain('\u2013');
+  });
+
   it('percent-encodes < > | in the console URL so it cannot break the link', () => {
     const text = slackText(note({ consoleUrl: 'https://x.example.com/a|b<c>d' }));
     expect(text).toContain('<https://x.example.com/a%7Cb%3Cc%3Ed|Open the reviewer console>');
@@ -149,6 +159,15 @@ describe('postJson', () => {
     const err = await postJson(fetchFn, url, init).catch((e: Error) => e);
     expect((err as Error).message).toBe('request failed');
     expect((err as Error).message).not.toContain('SECRET');
+  });
+
+  it('reports a real aborted and a real timed-out signal as timed out', async () => {
+    const reject = (async (_u: string, i: RequestInit) => { throw i.signal?.reason; }) as unknown as typeof fetch;
+    const timeout = AbortSignal.timeout(1);
+    await new Promise((r) => setTimeout(r, 20));
+    for (const sig of [AbortSignal.abort(), timeout]) {
+      await expect(postJson(reject, url, { ...init, signal: sig })).rejects.toThrow('timed out');
+    }
   });
 
   it.each(['TimeoutError', 'AbortError'])('reports %s as timed out', async (name) => {

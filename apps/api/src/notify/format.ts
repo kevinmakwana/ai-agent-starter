@@ -29,5 +29,5 @@ const slackLink = (s: string): string =>
 /** One line for a Slack incoming webhook. */
 export function slackText(n: ApprovalNote): string {
   const rule = n.rule ? ` (rule: ${escapeSlack(n.rule)})` : '';
-  return `Approval needed: ${escapeSlack(headline(n))}${rule} – <${slackLink(n.consoleUrl)}|Open the reviewer console>`;
+  return `Approval needed: ${escapeSlack(headline(n))}${rule} - <${slackLink(n.consoleUrl)}|Open the reviewer console>`;
 }

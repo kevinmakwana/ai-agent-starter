@@ -12,7 +12,8 @@ export async function postJson(
     // Redirects are not followed: a 3xx counts as a failure instead of sending the body somewhere else.
     res = await fetchFn(url, { method: 'POST', headers: init.headers, body: init.body, signal: init.signal, redirect: 'manual' });
   } catch (err) {
-    const name = err instanceof Error ? err.name : '';
+    // Not `instanceof Error`: an abort reason can come from another realm.
+    const name = (err as { name?: unknown } | null)?.name;
     throw new Error(name === 'TimeoutError' || name === 'AbortError' ? 'timed out' : 'request failed');
   }
   try {

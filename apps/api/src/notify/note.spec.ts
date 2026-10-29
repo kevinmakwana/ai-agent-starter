@@ -49,6 +49,21 @@ describe('buildNote', () => {
     expect(buildNote(row({ rule }), CONSOLE)).not.toHaveProperty('rule');
   });
 
+  it('omits an amount too large to be exact in cents, and keeps a large valid one', () => {
+    expect(buildNote(row({ toolArgs: { orderId: 11, amount: 1e307 } }), CONSOLE)).not.toHaveProperty('amount');
+    expect(buildNote(row({ toolArgs: { orderId: 11, amount: 1e21 } }), CONSOLE)).not.toHaveProperty('amount');
+    expect(buildNote(row({ toolArgs: { orderId: 11, amount: 9999999.99 } }), CONSOLE).amount).toBe(9999999.99);
+  });
+
+  it.each([['null', null], ['an array', [1, 2]], ['a number', 5]])('copes with toolArgs that is %s', (_label, toolArgs) => {
+    const note = buildNote(row({ toolArgs: toolArgs as unknown as Record<string, unknown> }), CONSOLE);
+    expect(Object.keys(note).sort()).toEqual(['consoleUrl', 'createdAt', 'id', 'rule', 'tool']);
+  });
+
+  it('omits a rule that is not a string', () => {
+    expect(buildNote(row({ rule: 5 as unknown as string }), CONSOLE)).not.toHaveProperty('rule');
+  });
+
   it('replaces an invalid tool name with unknown', () => {
     expect(buildNote(row({ toolName: 'Not Valid!' }), CONSOLE).tool).toBe('unknown');
   });
