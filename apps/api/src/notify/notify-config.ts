@@ -53,7 +53,7 @@ function httpUrl(name: string, raw: string): string {
  */
 function smtpUrl(name: string, raw: string): string {
   const url = parseUrl(raw, ['smtp:', 'smtps:']);
-  if (!url) throw new Error(`${name} must be an smtp:// or smtps:// URL`);
+  if (!url) throw new Error(`${name} must be an smtp:// or smtps:// URL (percent-encode special characters such as @ # : in the user name and password)`);
   if (url.hostname === '') throw new Error(`${name} must include a host`);
   if (url.search !== '' || url.hash !== '' || raw.includes('?') || raw.includes('#')) {
     throw new Error(`${name} must not contain a query string or fragment (percent-encode special characters in the password)`);

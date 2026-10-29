@@ -148,6 +148,7 @@ The three email variables go together: set all or none, otherwise the API stops 
 - Credentials go in the URL's userinfo and must be percent-encoded: write `@` as `%40`, `#` as `%23` and `:` as `%3A` in a password.
 - The URL must have a host, and no query string or fragment is allowed (nodemailer would copy query keys such as `?debug=true` or `?tls.rejectUnauthorized=false` into its options and override the hardened settings).
 - A remote `smtp://` host requires STARTTLS (`requireTLS`), so the connection cannot be silently downgraded to plaintext before AUTH; if the server does not offer it, the send fails. `smtp://` to `localhost`, `127.0.0.1` or `[::1]` does not require it, which keeps a local dev mail catcher working. `smtps://` uses TLS from the start.
+- Remote or internal plaintext relays that do not offer STARTTLS (for example `smtp://mailpit:1025` in a Docker network) cannot be used; point the API at a relay that offers STARTTLS, use `smtps://`, or use `localhost`.
 - The per-attempt allowance for email is 20 s (other channels 5 s), because a slow handshake plus AUTH and DATA can take longer than 5 s. Even so, a very slow server can still deliver an attempt the notifier has given up on, which can mean a duplicate email.
 
 ### What triggers a notification
@@ -198,10 +199,11 @@ where `<hex>` is the hex HMAC-SHA256, keyed with the secret, of the string `"<x-
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
 // secret:    your NOTIFY_WEBHOOK_SECRET
-// timestamp: the x-timestamp header, as received
+// timestamp: the x-timestamp header, as received (unix seconds)
+// signatureHeader: the x-signature header
 // rawBody:   the request body exactly as received (Buffer or string), before JSON parsing
 const expected = Buffer.from('sha256=' + createHmac('sha256', secret).update(`${timestamp}.${rawBody}`).digest('hex'));
-const received = Buffer.from(signatureHeader); // the x-signature header
+const received = Buffer.from(signatureHeader);
 const ok = received.length === expected.length && timingSafeEqual(received, expected); // timingSafeEqual throws on unequal lengths
 ```
 
@@ -213,7 +215,7 @@ Each attempt has a 5 s timeout (20 s for email); anything but a 2xx response, or
 
 ### Limits
 
-- **At most once.** The claim commits before delivery, so a notification that fails all three attempts is not sent again, neither is one in flight when the process is killed, and neither is one whose rows never came back because the database connection dropped after the claim committed. It still shows in the console, which is the source of truth. A graceful shutdown (`SIGTERM`) gives back the approvals it had claimed but not yet started on, and the next process announces them; one whose delivery had begun counts as attempted and is not released (it gets no further retries once shutdown begins). A hard kill between the claim and the send loses the notifications of that batch: up to 5 approvals, not just one.
+- **At most once.** The claim commits before delivery, so a notification that fails all three attempts is not sent again, neither is one in flight when the process is killed, and neither is one whose rows never came back because the database connection dropped after the claim committed. It still shows in the console, which is the source of truth. A graceful shutdown (`SIGTERM`) gives back the approvals it had claimed but not yet started on, and the next process announces them; one whose delivery had begun counts as attempted and is not released (it gets no further retries once shutdown begins). Shutdown waits for an attempt already in flight, up to 5 s (20 s for email), so give the container a stop grace period longer than that; if it is killed first, the unstarted approvals are not released. A hard kill between the claim and the send loses the notifications of that batch: up to 5 approvals, not just one.
 - **A duplicate is still possible.** A send abandoned after its timeout (5 s, 20 s for email) may complete on the receiver's side and then be retried. Have receivers dedupe on the approval `id`.
 - **One slow channel can delay others.** The channels of one approval run in parallel, but approvals are delivered one at a time, so a dead channel (about 20 s per approval, and up to about 65 s for email) can delay later notifications.
 - **Delay.** Normally the message goes out within moments of the approval being parked. If the bus signal is missed, the 60 s sweep is the worst case, plus any time spent behind slow deliveries.
