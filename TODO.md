@@ -37,7 +37,7 @@
 - [x] 4.1 SSE streaming of runs (API + a `fetch`-based SSE client in the web app).
 - [x] 4.2 Threshold-based approval policy per tool.
 - [x] 4.3 Audit log of approval decisions, shown in the reviewer console.
-- [ ] 4.4 Reviewer notifications on new pending approvals (webhook, then email/Slack).
+- [x] 4.4 Reviewer notifications on new pending approvals (webhook, then email/Slack).
 - [ ] 4.5 Per-reviewer accounts, four-eyes rule, then customer login.
 - [x] 4.6 More tools: `cancel_order` (risky), `track_shipment`.
 

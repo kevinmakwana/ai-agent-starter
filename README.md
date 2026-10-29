@@ -123,6 +123,89 @@ Events are signals only (`{ "conversationId": "…" }`, no content; `resync` car
 
 Validation uses `class-validator` with `whitelist` + `forbidNonWhitelisted` (unknown fields → `400`). Upstream LLM failures return `502` with a clear message and mark the run `failed`. A failed run's stored error is shown verbatim only to reviewers; customers get a generic message.
 
+## Reviewer notifications
+
+A reviewer does not have to keep the console open. When the agent parks a risky action, the API pushes one short message to whichever channels you configured: a signed JSON webhook, a Slack incoming webhook, and/or email over SMTP. Code lives in [apps/api/src/notify/](apps/api/src/notify/); the design is in [the spec](docs/superpowers/specs/2026-10-29-reviewer-notifications-design.md).
+
+**Off by default.** A channel is on only when its variables are set. With none set nothing starts and nothing is claimed (`notified_at` stays null), so the API behaves exactly as before. Turning a channel on later announces the approvals that are pending at that moment.
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `NOTIFY_WEBHOOK_URL` | _(unset)_ | Generic JSON webhook. Must be `https://`; plain `http://` is accepted only for `localhost`, `127.0.0.1` and `[::1]` |
+| `NOTIFY_WEBHOOK_SECRET` | _(unset)_ | Signs each webhook request (see below). Without it the request carries no signature headers. Setting it without `NOTIFY_WEBHOOK_URL` stops the API at startup |
+| `NOTIFY_SLACK_WEBHOOK_URL` | _(unset)_ | Slack incoming-webhook URL, same `https` / localhost rule |
+| `NOTIFY_SMTP_URL` | _(unset)_ | `smtp://` or `smtps://` URL, credentials included, e.g. `smtps://user:pass@smtp.example.com:465` |
+| `NOTIFY_EMAIL_FROM` | _(unset)_ | Sender: one plain address like `alerts@example.com` (no display name) |
+| `NOTIFY_EMAIL_TO` | _(unset)_ | Comma-separated plain addresses; one message goes to all of them |
+| `REVIEWER_CONSOLE_URL` | `http://localhost:3000/reviewer` | The link put in every message; any `http(s)` URL |
+
+The three email variables go together: set all or none, otherwise the API stops at startup. Every value is checked at startup and a bad one stops the API; the error names the variable, never its value, because these URLs can carry secrets. Empty values count as unset, so a copied `.env.example` is fine.
+
+### What triggers a notification
+
+- an `approvals` event on the stream bus (a burst is throttled into one check, 200 ms after the first event), or a `resync` event;
+- one check when the API starts;
+- a sweep every 60 s, as a safety net if a bus signal was missed.
+
+Each check **claims** pending approvals that have not been announced yet: it sets `actions.notified_at` in one statement with `FOR UPDATE SKIP LOCKED`, and that commits before anything is sent. So several API replicas, or a restart, never announce the same approval twice. Only approvals still `pending_approval` are claimed, so a decision or an expiry does not send anything. Checks never overlap within a process, and a pass handles up to 20 approvals at a time, repeating while there are more.
+
+### What is sent
+
+Every channel gets the same small summary, built in one place ([note.ts](apps/api/src/notify/note.ts)) from an allowlist of fields:
+
+```json
+{
+  "event": "approval.requested",
+  "approval": {
+    "id": "3f0c2c52-8f0e-4a63-9a53-3f1d2d1b7c11",
+    "tool": "issue_refund",
+    "orderId": 1,
+    "amount": 18.75,
+    "rule": "over_threshold",
+    "createdAt": "2026-10-29T09:15:02.481Z",
+    "consoleUrl": "http://localhost:3000/reviewer"
+  }
+}
+```
+
+`orderId`, `amount` and `rule` are left out when the value is missing or malformed, and `amount` appears only for `issue_refund`. **Deliberately never sent:** customer name, email, the customer's message, the conversation id, the refund or cancellation reason, the agent's reasoning, and the rest of the tool arguments. Open the console to read those.
+
+- **Webhook:** `POST` with `Content-Type: application/json` and the body above. Redirects are not followed (a 3xx counts as a failed attempt).
+- **Slack:** one line, e.g. `Approval needed: refund $18.75 on order #1 (rule: over_threshold) - <link|Open the reviewer console>`.
+- **Email:** a plain-text message (no HTML) with the subject `Approval needed: refund $18.75 on order #1`, the rule, the request time and the console link.
+
+### Verifying the webhook signature
+
+With `NOTIFY_WEBHOOK_SECRET` set, each request carries two extra headers:
+
+```
+x-timestamp: <unix seconds>
+x-signature: sha256=<hex>
+```
+
+where `<hex>` is the hex HMAC-SHA256, keyed with the secret, of the string `"<x-timestamp>.<raw body>"`. Compute it over the raw request bytes, before any JSON parsing, and compare in constant time:
+
+```js
+const expected = 'sha256=' + createHmac('sha256', secret).update(`${timestamp}.${rawBody}`).digest('hex');
+```
+
+Because the timestamp is signed, **also reject requests whose `x-timestamp` is too old** (say, more than five minutes) so a captured request cannot be replayed later.
+
+### Delivery and retries
+
+Each attempt has a 5 s timeout; anything but a 2xx response, or any error, is a failed attempt. A channel gets 3 attempts, waiting 1 s and then 4 s between them. After the third failure the API logs one line, `Notification via <channel> failed for approval <id>: <short reason>`, and gives up. The line never contains a URL, a secret, a response body or the SMTP error text. Channels retry independently, so a failing Slack does not hold back the webhook for the same approval.
+
+### Limits
+
+- **At most once.** The claim commits before delivery, so a notification that fails all three attempts is not sent again, and neither is one in flight when the process is killed. It still shows in the console, which is the source of truth. A graceful shutdown (`SIGTERM`) gives back the approvals it had claimed but not yet started on, and the next process announces them; one whose delivery had begun counts as attempted and is not released (it gets no further retries once shutdown begins). A hard kill between the claim and the send loses that notification.
+- **A duplicate is still possible.** A send abandoned after its 5 s timeout may complete on the receiver's side and then be retried. Have receivers dedupe on the approval `id`.
+- **One slow channel can delay others.** The channels of one approval run in parallel, but approvals are delivered one at a time, so a dead channel (up to about 20 s of timeouts and waits per approval) can delay later notifications.
+- **Delay.** Normally the message goes out within moments of the approval being parked. If the bus signal is missed, the 60 s sweep is the worst case, plus any time spent behind slow deliveries.
+- **Pending approvals only.** There are no decision or expiry notifications, no reminders or escalation, and no per-reviewer routing: every configured channel gets every approval, once.
+- `GET /approvals` and the reviewer view of a conversation include `notifiedAt` (null until announced); customers never see it.
+
+Test coverage: the channels are covered by unit tests with fakes (the email channel through nodemailer's JSON transport, the others with a fake `fetch`), and the webhook additionally by an end-to-end test against Postgres and a local receiver. They have **not** been exercised against a real Slack workspace or SMTP server, so try yours with a test approval (see the quick start) before relying on it.
+
 ## Configuration
 
 One root `.env` (see [.env.example](.env.example)); everything is optional.
@@ -146,6 +229,10 @@ One root `.env` (see [.env.example](.env.example)); everything is optional.
 | `TRUST_PROXY` | `0` | Proxy hops whose `X-Forwarded-For` is trusted for client identity (see Security notes) |
 | `STREAM_MAX_PER_CONVERSATION` | `5` | Max concurrent SSE streams per conversation; more get `429` |
 | `STREAM_MAX_REVIEWER` | `20` | Max concurrent reviewer-console SSE streams; more get `429` |
+| `NOTIFY_WEBHOOK_URL`, `NOTIFY_WEBHOOK_SECRET` | _(unset)_ | Reviewer notifications: signed JSON webhook (https, or http for localhost) and its optional signing secret. See [Reviewer notifications](#reviewer-notifications) |
+| `NOTIFY_SLACK_WEBHOOK_URL` | _(unset)_ | Reviewer notifications: Slack incoming-webhook URL |
+| `NOTIFY_SMTP_URL`, `NOTIFY_EMAIL_FROM`, `NOTIFY_EMAIL_TO` | _(unset)_ | Reviewer notifications by email; all three or none. `NOTIFY_EMAIL_TO` is comma-separated |
+| `REVIEWER_CONSOLE_URL` | `http://localhost:3000/reviewer` | Link put in every notification |
 | `LLM_PROVIDER` | `mock` | `mock` \| `openai` \| `anthropic` |
 | `LLM_MAX_RETRIES` | `2` | Extra attempts for network errors, `408`, `429` and `5xx` from the provider (exponential backoff with jitter; honours `Retry-After`, but never waits longer than 30 s). `0` = off |
 | `LLM_MAX_TOKENS` | _(unset)_ | Output cap per model call; reasoning tokens count against it. Unset = Anthropic `4096`, OpenAI the model's own limit. A response cut off by the cap fails the run instead of being used |
@@ -168,6 +255,8 @@ E2E_DATABASE_URL=postgres://postgres:postgres@localhost:5432/aiagent npm test   
 - Jest runs test files one at a time (`maxWorkers: 1`) because the e2e suites share one database.
 - **E2E:** the same approval flow over HTTP against real Postgres, plus input validation, reviewer-key and conversation-token access rules, the approval-time balance re-check and the `502` mapping. **It re-seeds the target database**, so point it at a disposable one.
 - **Stream e2e:** against real Postgres, `/events` and `/conversations/:id/events` deliver `trace` / `approvals` / `audit` to the right audience only, refuse bad credentials and malformed ids, enforce the caps (including for a differently-cased id), publish nothing for a rolled-back write, send `resync` after the `LISTEN` backend is killed, and end promptly on `app.close()`.
+- **Notifications (Jest):** config validation, the note builder's allowlist (including hostile tool arguments), the webhook signature, Slack escaping, the email message (against nodemailer's JSON transport, no SMTP server), retry timing, timeouts and log redaction with fake timers and fake channels, non-overlapping passes, and release on shutdown.
+- **Notifications e2e:** against real Postgres, claims are handed out once and never overlap between concurrent claimers; a signed webhook reaches a local receiver exactly once per parked approval (also with two replicas) and carries none of the customer's data; a decision sends nothing; a failing receiver is retried three times and logged without its URL; shutdown releases rows it had not started; nothing is claimed with no channel configured; `notifiedAt` is hidden from customers.
 - CI runs typecheck, tests (with a Postgres service container) and build on every push.
 
 Regenerate the README screenshots with the stack running: `npm run screenshot` (needs `npx playwright install chromium` once).
@@ -196,6 +285,7 @@ This is a **starter, not a production service**. What is and isn't protected:
 - **Customers never see the policy.** The customer view of `GET /conversations/:id` omits the policy fields (`policyRule`, `policyDetail`), so the threshold and the rule that applied are visible to reviewers only.
 - **Crash recovery.** If the process dies after a reviewer's decision is claimed but before it is carried out, the same minute-by-minute pass finishes it once the claim is five minutes old (even with expiry disabled). Refunds are idempotent per approval, so a refund that had already committed is never paid twice, and a cancellation that had already committed is not repeated.
 - **Input limits.** Messages are trimmed, must be 1-2000 characters, and may not contain NUL (Postgres text cannot hold it); tool ids are bounded to the database's integer range. Bad values are a `400` at the edge instead of a failed run.
+- **Notifications carry no customer data.** Messages hold an approval id, tool, order id, refund amount, policy rule, time and the console link, never names, emails, messages or reasons. Webhook, Slack and SMTP URLs are validated at startup and never appear in logs or error messages. Webhooks are `https` only (plain `http` for localhost), are not redirected, and are HMAC-signed when `NOTIFY_WEBHOOK_SECRET` is set. This is not a full SSRF defence: the operator controls these values. Delivery is at most once (see [Reviewer notifications](#reviewer-notifications)).
 - **Provider replies.** A body that is not JSON, one cut off mid-read, or an empty model reply becomes a `502` and a failed run (an empty reply is kept in the trace, flagged `EMPTY_RESPONSE`, with its tokens counted, but never replayed to the model).
 
 ## Known limitations
