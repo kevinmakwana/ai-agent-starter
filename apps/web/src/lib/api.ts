@@ -7,11 +7,16 @@ export class ApiError extends Error {
   constructor(message: string, readonly status: number) { super(message); }
 }
 
-async function call<T>(path: string, init: RequestInit = {}, auth: Auth = {}): Promise<T> {
+export function authHeaders(auth: Auth): Record<string, string> {
   const headers: Record<string, string> = {};
-  if (init.body) headers['content-type'] = 'application/json';
   if (auth.key) headers.authorization = `Bearer ${auth.key}`;
   if (auth.token) headers['x-conversation-token'] = auth.token;
+  return headers;
+}
+
+async function call<T>(path: string, init: RequestInit = {}, auth: Auth = {}): Promise<T> {
+  const headers = authHeaders(auth);
+  if (init.body) headers['content-type'] = 'application/json';
   const res = await fetch(`/api${path}`, { ...init, headers, cache: 'no-store' });
   const body = await res.json().catch(() => null);
   if (!res.ok) {

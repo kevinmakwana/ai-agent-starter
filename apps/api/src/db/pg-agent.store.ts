@@ -1,9 +1,10 @@
 import { createHash, randomBytes } from 'node:crypto';
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import { ConflictError } from '../agent/errors';
 import type {
   Action, ActionStatus, AgentStore, ApprovalEvent, Conversation, DecisionAudit, NewAction, NewApprovalEvent, NewStep, Run, RunMeta, Step,
 } from '../agent/types';
+import { AGENT_EVENTS_CHANNEL, type AgentEventKind, encodeEvent } from '../events/agent-events';
 import { camel } from './pool';
 
 const hashToken = (token: string) => createHash('sha256').update(token).digest('hex');
@@ -41,6 +42,27 @@ export class PgAgentStore implements AgentStore {
   private static readonly CONVERSATION = `
     SELECT c.id, c.customer_id, c.title, c.created_at, cu.name AS customer_name, cu.email AS customer_email
     FROM conversations c JOIN customers cu ON cu.id = c.customer_id`;
+
+  /** Runs `work` in one transaction on its own connection. */
+  private async inTx<T>(work: (db: PoolClient) => Promise<T>): Promise<T> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const result = await work(client);
+      await client.query('COMMIT');
+      return result;
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+  }
+
+  /** Postgres delivers a NOTIFY only when its transaction commits, so a signal never outruns (or outlives) its write. */
+  private async publish(db: Db, conversationId: string, ...kinds: AgentEventKind[]): Promise<void> {
+    for (const kind of kinds) await db.query('SELECT pg_notify($1, $2)', [AGENT_EVENTS_CHANNEL, encodeEvent(kind, conversationId)]);
+  }
 
   /** The returned accessToken is the only credential for this conversation; only its hash is stored. */
   async createConversation(customerId: number, title: string): Promise<Conversation & { accessToken: string }> {
@@ -85,11 +107,9 @@ export class PgAgentStore implements AgentStore {
    * check-then-insert atomic without holding a connection (or the lock) for the length of the run.
    */
   async createRun(conversationId: string, meta: Partial<RunMeta> = {}): Promise<Run> {
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN');
-      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [conversationId]);
-      await client.query(
+    return this.inTx(async (db) => {
+      await db.query('SELECT pg_advisory_xact_lock(hashtext($1))', [conversationId]);
+      await db.query(
         `UPDATE runs r SET status = 'failed', error = 'Abandoned: the process died mid-run', finished_at = now()
          WHERE r.conversation_id = $1 AND r.status = 'running'
            AND r.created_at < now() - $2::double precision * interval '1 millisecond'
@@ -97,23 +117,18 @@ export class PgAgentStore implements AgentStore {
                            AND s.created_at > now() - $2::double precision * interval '1 millisecond')`,
         [conversationId, this.staleRunMs],
       );
-      const busy = await client.query(
+      const busy = await db.query(
         "SELECT 1 FROM runs WHERE conversation_id = $1 AND status IN ('running', 'awaiting_approval') LIMIT 1",
         [conversationId],
       );
       if (busy.rowCount) throw new ConflictError('This conversation already has a run in progress or waiting for approval.');
-      const { rows } = await client.query(
+      const { rows } = await db.query(
         "INSERT INTO runs (conversation_id, status, provider, model, prompt_version) VALUES ($1, 'running', $2, $3, $4) RETURNING *",
         [conversationId, meta.provider ?? null, meta.model ?? null, meta.promptVersion ?? null],
       );
-      await client.query('COMMIT');
+      await this.publish(db, conversationId, 'trace');
       return camel<Run>(rows[0]);
-    } catch (e) {
-      await client.query('ROLLBACK');
-      throw e;
-    } finally {
-      client.release();
-    }
+    });
   }
 
   async getRun(id: string): Promise<Run | null> {
@@ -122,27 +137,34 @@ export class PgAgentStore implements AgentStore {
   }
 
   async updateRun(id: string, patch: Partial<Pick<Run, 'status' | 'modelCalls' | 'error'>>): Promise<Run> {
-    const { rows } = await this.pool.query(
-      `UPDATE runs SET
-         status = COALESCE($2, status),
-         model_calls = COALESCE($3, model_calls),
-         error = COALESCE($4, error),
-         finished_at = CASE WHEN $2 = ANY($5::text[]) THEN now() WHEN $2 IS NOT NULL THEN NULL ELSE finished_at END
-       WHERE id = $1 RETURNING *`,
-      [id, patch.status ?? null, patch.modelCalls ?? null, patch.error ?? null, TERMINAL],
-    );
-    return camel<Run>(rows[0]);
+    return this.inTx(async (db) => {
+      const { rows } = await db.query(
+        `UPDATE runs SET
+           status = COALESCE($2, status),
+           model_calls = COALESCE($3, model_calls),
+           error = COALESCE($4, error),
+           finished_at = CASE WHEN $2 = ANY($5::text[]) THEN now() WHEN $2 IS NOT NULL THEN NULL ELSE finished_at END
+         WHERE id = $1 RETURNING *`,
+        [id, patch.status ?? null, patch.modelCalls ?? null, patch.error ?? null, TERMINAL],
+      );
+      const run = camel<Run>(rows[0]);
+      await this.publish(db, run.conversationId, 'trace');
+      return run;
+    });
   }
 
   async addStep(s: NewStep): Promise<Step> {
-    const { rows } = await this.pool.query(
-      `INSERT INTO steps (run_id, conversation_id, role, content, tool_name, tool_args, tool_call_id, result, latency_ms, input_tokens, output_tokens, cached_input_tokens)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
-      [s.runId, s.conversationId, s.role, s.content ?? null, s.toolName ?? null,
-       s.toolArgs === undefined ? null : JSON.stringify(s.toolArgs), s.toolCallId ?? null,
-       s.result === undefined ? null : JSON.stringify(s.result), s.latencyMs ?? null, s.inputTokens ?? null, s.outputTokens ?? null, s.cachedInputTokens ?? null],
-    );
-    return camel<Step>(rows[0]);
+    return this.inTx(async (db) => {
+      const { rows } = await db.query(
+        `INSERT INTO steps (run_id, conversation_id, role, content, tool_name, tool_args, tool_call_id, result, latency_ms, input_tokens, output_tokens, cached_input_tokens)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
+        [s.runId, s.conversationId, s.role, s.content ?? null, s.toolName ?? null,
+         s.toolArgs === undefined ? null : JSON.stringify(s.toolArgs), s.toolCallId ?? null,
+         s.result === undefined ? null : JSON.stringify(s.result), s.latencyMs ?? null, s.inputTokens ?? null, s.outputTokens ?? null, s.cachedInputTokens ?? null],
+      );
+      await this.publish(db, s.conversationId, 'trace');
+      return camel<Step>(rows[0]);
+    });
   }
 
   async conversationUsage(conversationId: string): Promise<{ inputTokens: number; outputTokens: number }> {
@@ -165,27 +187,20 @@ export class PgAgentStore implements AgentStore {
   }
 
   async createAction(a: NewAction): Promise<Action> {
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN');
-      const { rows } = await client.query(
+    return this.inTx(async (db) => {
+      const { rows } = await db.query(
         `INSERT INTO actions (run_id, conversation_id, tool_name, tool_args, tool_call_id, reasoning)
          VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
         [a.runId, a.conversationId, a.toolName, JSON.stringify(a.toolArgs), a.toolCallId, a.reasoning],
       );
       const action = camel<Action>(rows[0]);
-      await this.insertEvent(client, {
+      await this.insertEvent(db, {
         kind: 'requested', actionId: action.id, runId: a.runId, conversationId: a.conversationId, actorType: 'policy',
         toolName: a.toolName, toolArgs: a.toolArgs, rule: a.policy?.rule, detail: a.policy?.detail,
       });
-      await client.query('COMMIT');
+      await this.publish(db, a.conversationId, 'trace', 'approvals');
       return action;
-    } catch (e) {
-      await client.query('ROLLBACK');
-      throw e;
-    } finally {
-      client.release();
-    }
+    });
   }
 
   async getAction(id: string): Promise<Action | null> {
@@ -197,31 +212,21 @@ export class PgAgentStore implements AgentStore {
     id: string, status: 'approved' | 'rejected', note?: string,
     audit: DecisionAudit = { kind: status, actorType: 'reviewer' },
   ): Promise<Action | null> {
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN');
-      const { rows } = await client.query(
+    return this.inTx(async (db) => {
+      const { rows } = await db.query(
         `UPDATE actions SET status = $2, decision_note = $3, decided_at = now()
          WHERE id = $1 AND status = 'pending_approval' RETURNING *`,
         [id, status, note ?? null],
       );
-      if (!rows[0]) {
-        await client.query('ROLLBACK');
-        return null;
-      }
+      if (!rows[0]) return null;
       const action = camel<Action>(rows[0]);
-      await this.insertEvent(client, {
+      await this.insertEvent(db, {
         kind: audit.kind, actionId: id, runId: action.runId, conversationId: action.conversationId, actorType: audit.actorType,
         toolName: action.toolName, toolArgs: action.toolArgs, note,
       });
-      await client.query('COMMIT');
+      await this.publish(db, action.conversationId, 'trace', 'approvals');
       return action;
-    } catch (e) {
-      await client.query('ROLLBACK');
-      throw e;
-    } finally {
-      client.release();
-    }
+    });
   }
 
   private async insertEvent(db: Db, e: NewApprovalEvent): Promise<ApprovalEvent> {
@@ -231,11 +236,12 @@ export class PgAgentStore implements AgentStore {
       [e.kind, e.actionId ?? null, e.runId, e.conversationId, e.actorType, e.actorId ?? null, e.toolName,
        JSON.stringify(e.toolArgs), e.rule ?? null, e.detail ? JSON.stringify(e.detail) : null, e.note ?? null],
     );
+    await this.publish(db, e.conversationId, 'audit');
     return camel<ApprovalEvent>(rows[0]);
   }
 
   addApprovalEvent(e: NewApprovalEvent): Promise<ApprovalEvent> {
-    return this.insertEvent(this.pool, e);
+    return this.inTx((db) => this.insertEvent(db, e));
   }
 
   async listApprovalEvents(filter: { conversationId?: string; limit?: number; before?: number } = {}): Promise<ApprovalEvent[]> {
@@ -268,15 +274,21 @@ export class PgAgentStore implements AgentStore {
   }
 
   async reopenAction(id: string): Promise<void> {
-    await this.pool.query(
-      `UPDATE actions SET status = 'pending_approval', decision_note = NULL, decided_at = NULL
-       WHERE id = $1 AND status <> 'pending_approval' AND result IS NULL`,
-      [id],
-    );
+    await this.inTx(async (db) => {
+      const { rows } = await db.query(
+        `UPDATE actions SET status = 'pending_approval', decision_note = NULL, decided_at = NULL
+         WHERE id = $1 AND status <> 'pending_approval' AND result IS NULL RETURNING conversation_id`,
+        [id],
+      );
+      if (rows[0]) await this.publish(db, rows[0].conversation_id, 'trace', 'approvals');
+    });
   }
 
   async setActionResult(id: string, result: unknown): Promise<void> {
-    await this.pool.query('UPDATE actions SET result = $2 WHERE id = $1', [id, JSON.stringify(result)]);
+    await this.inTx(async (db) => {
+      const { rows } = await db.query('UPDATE actions SET result = $2 WHERE id = $1 RETURNING conversation_id', [id, JSON.stringify(result)]);
+      if (rows[0]) await this.publish(db, rows[0].conversation_id, 'trace', 'approvals');
+    });
   }
 
   async listActions(status?: ActionStatus): Promise<Action[]> {

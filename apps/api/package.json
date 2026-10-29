@@ -46,6 +46,7 @@
     "maxWorkers": 1,
     "testRegex": "(src|test)/.*\\.(spec|e2e-spec)\\.ts$",
     "transform": { "^.+\\.ts$": ["ts-jest", { "tsconfig": "tsconfig.json" }] },
-    "testEnvironment": "node"
+    "testEnvironment": "node",
+    "testTimeout": 15000
   }
 }

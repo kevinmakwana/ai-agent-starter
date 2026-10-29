@@ -20,6 +20,13 @@ export interface RateLimits {
   messagesPerMinute: number;
 }
 
+export interface StreamLimits {
+  /** Open SSE streams per conversation (a customer may have several tabs). */
+  perConversation: number;
+  /** Open reviewer-console streams across the API. */
+  reviewer: number;
+}
+
 function positiveInt(env: NodeJS.ProcessEnv, name: string, fallback: number): number {
   const raw = env[name];
   if (raw === undefined || raw === '') return fallback;
@@ -91,6 +98,8 @@ export interface AppConfig {
   /** Proxy hops whose X-Forwarded-For is trusted for client identity; false = use the socket address. */
   trustProxy: number | false;
   rateLimit: RateLimits;
+  /** Caps on concurrent server-sent-event streams; over the cap answers 429. */
+  streams: StreamLimits;
   /** Max tokens (input + output) per conversation before the agent stops calling the model. */
   conversationTokenBudget: number;
   /** Rough cap (tokens) on the conversation history sent to the model per call; older turns are left out. */
@@ -125,6 +134,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     corsOrigins: parseCorsOrigins(env.CORS_ORIGINS),
     trustProxy: parseTrustProxy(env.TRUST_PROXY),
     rateLimit: loadRateLimits(env),
+    streams: {
+      perConversation: positiveInt(env, 'STREAM_MAX_PER_CONVERSATION', 5),
+      reviewer: positiveInt(env, 'STREAM_MAX_REVIEWER', 20),
+    },
     conversationTokenBudget: positiveInt(env, 'CONVERSATION_TOKEN_BUDGET', 200_000),
     contextMaxTokens: positiveInt(env, 'CONTEXT_MAX_TOKENS', 8000),
     approvalTtlMinutes: nonNegativeInt(env, 'APPROVAL_TTL_MINUTES', 1440),

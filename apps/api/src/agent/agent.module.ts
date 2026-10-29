@@ -3,9 +3,11 @@ import { APP_FILTER } from '@nestjs/core';
 import type { AppConfig } from '../config';
 import { PgAgentStore } from '../db/pg-agent.store';
 import { PgShopRepo } from '../db/pg-shop.repo';
+import { StreamBus, pgListenConnection } from '../events/stream-bus';
 import { ApprovalsController } from '../http/approvals.controller';
 import { ConversationsController } from '../http/conversations.controller';
 import { DomainErrorFilter } from '../http/domain-error.filter';
+import { EventsController } from '../http/events.controller';
 import { HealthController } from '../http/health.controller';
 import { createProvider } from '../providers';
 import { APP_CONFIG, CHAT_PROVIDER } from '../tokens';
@@ -15,7 +17,7 @@ import { AgentRunner } from './runner';
 import type { ChatProvider } from './types';
 
 @Module({
-  controllers: [HealthController, ConversationsController, ApprovalsController],
+  controllers: [HealthController, ConversationsController, ApprovalsController, EventsController],
   providers: [
     { provide: CHAT_PROVIDER, inject: [APP_CONFIG], useFactory: (cfg: AppConfig) => createProvider(cfg) },
     {
@@ -35,6 +37,15 @@ import type { ChatProvider } from './types';
         }),
     },
     ApprovalExpiryScheduler,
+    {
+      provide: StreamBus,
+      inject: [APP_CONFIG],
+      useFactory: (cfg: AppConfig) =>
+        new StreamBus({
+          connect: () => pgListenConnection(cfg.databaseUrl),
+          onError: (e) => new Logger('StreamBus').warn(`Live-update listener: ${e instanceof Error ? e.message : e}`),
+        }),
+    },
     { provide: APP_FILTER, useClass: DomainErrorFilter },
   ],
 })

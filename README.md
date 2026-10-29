@@ -56,6 +56,10 @@ flowchart LR
   UI -. "POST /approvals/:id → resume" .-> HTTP
 ```
 
+### Live updates
+
+The chat and the reviewer console update over SSE instead of polling. The store's run, step, approval and audit writes run `pg_notify` inside the same transaction, so Postgres delivers the signal only on commit. Creating a conversation and the shop-side writes (refunds, tickets) do not publish on their own; the step or result write that follows them does. One dedicated `LISTEN` connection per API process (`StreamBus`) fans the signals out to open streams, so it works across several API replicas on the same database. The connection uses TCP keepalive and a connect timeout, and is probed with `SELECT 1` every 30 s, so a silently dead connection is replaced (followed by a `resync`) rather than leaving clients on a frozen UI. The server sends a `: connected` comment on open and a `: ping` comment every 15 s, and a synthetic `resync` event if the `LISTEN` connection is lost and restored. The UI polls (chat 3 s, 500 ms while sending; console 2 s) only while the stream is not live, and a "Live / Connecting / Polling" chip in the top bar shows which mode it is in. Open streams are completed on shutdown so `SIGTERM` / `docker stop` does not hang; graceful shutdown can still wait a few seconds (the idle keep-alive timeout) for a pooled idle client socket.
+
 ## Quick start
 
 Requires Node 22+ and Docker.
@@ -101,13 +105,17 @@ It asks "Where is my order #1?", validates the tool call against the real tool s
 | `GET /conversations` | 🔒 reviewer: list all conversations (with pending-approval counts) |
 | `GET /conversations/:id` | 🔑 Full trace: runs → steps, plus approvals and token `usage` (per run and per conversation, with the budget) |
 | `POST /conversations/:id/messages` | 🔑 Send `{ content }`; runs the agent until it answers or pauses (`409` while another run is in progress or an approval is pending) |
+| `GET /conversations/:id/events` | 🔑 SSE stream of `trace` signals for one conversation (`429` over `STREAM_MAX_PER_CONVERSATION`) |
 | `GET /approvals?status=pending` | 🔒  List approvals (`pending` \| `approved` \| `rejected` \| `all`) with customer, order and reasoning context |
 | `GET /approvals/events` | 🔒 Append-only audit log of approval decisions, newest first (`conversationId`, `limit` up to 200, `before` event id). Kinds: `requested`, `auto_approved`, `approved`, `rejected`, `expired` |
 | `POST /approvals/:id` | 🔒 `{ decision: "approve" \| "reject", note? }`; executes the parked call and resumes the run (`409` if already decided) |
+| `GET /events` | 🔒 SSE stream of `trace` / `approvals` / `audit` signals for the reviewer console (`429` over `STREAM_MAX_REVIEWER`) |
 | `GET /customers` | 🔒 Customers for the demo picker (extra) |
 | `GET /health` | API + database + active provider + whether reviewer auth is on |
 
 🔒 = reviewer key (`Authorization: Bearer <REVIEWER_API_KEY>`). 🔑 = the conversation's `X-Conversation-Token`, or the reviewer key. Both are open when `REVIEWER_API_KEY` is unset (demo mode).
+
+Events are signals only (`{ "conversationId": "…" }`, no content; `resync` carries `{}`): clients refetch the normal endpoints to see what changed. The client sends its credential in headers (a `fetch`-based reader, not `EventSource`, which cannot set headers), and every connect is followed by a refetch.
 
 Validation uses `class-validator` with `whitelist` + `forbidNonWhitelisted` (unknown fields → `400`). Upstream LLM failures return `502` with a clear message and mark the run `failed`. A failed run's stored error is shown verbatim only to reviewers; customers get a generic message.
 
@@ -132,6 +140,8 @@ One root `.env` (see [.env.example](.env.example)); everything is optional.
 | `RATE_LIMIT_START_PER_MINUTE` / `RATE_LIMIT_MESSAGES_PER_MINUTE` | `10` / `20` | Stricter per-client limits on `POST /conversations` and `POST /conversations/:id/messages` |
 | `CORS_ORIGINS` | _(empty)_ | Comma-separated exact origins allowed to call the API from a browser. Empty = none |
 | `TRUST_PROXY` | `0` | Proxy hops whose `X-Forwarded-For` is trusted for client identity (see Security notes) |
+| `STREAM_MAX_PER_CONVERSATION` | `5` | Max concurrent SSE streams per conversation; more get `429` |
+| `STREAM_MAX_REVIEWER` | `20` | Max concurrent reviewer-console SSE streams; more get `429` |
 | `LLM_PROVIDER` | `mock` | `mock` \| `openai` \| `anthropic` |
 | `LLM_MAX_RETRIES` | `2` | Extra attempts for network errors, `408`, `429` and `5xx` from the provider (exponential backoff with jitter; honours `Retry-After`, but never waits longer than 30 s). `0` = off |
 | `LLM_MAX_TOKENS` | _(unset)_ | Output cap per model call; reasoning tokens count against it. Unset = Anthropic `4096`, OpenAI the model's own limit. A response cut off by the cap fails the run instead of being used |
@@ -143,13 +153,16 @@ One root `.env` (see [.env.example](.env.example)); everything is optional.
 
 ```bash
 npm run typecheck
-npm test                                  # unit tests; e2e is skipped without a DB URL
+npm test                                  # API unit tests, then web unit tests; e2e is skipped without a DB URL
 E2E_DATABASE_URL=postgres://postgres:postgres@localhost:5432/aiagent npm test   # + e2e
 ```
 
 - **Unit (Jest):** tool schema validation, guardrail rules (cross-customer access and over-refund blocked), provider adapters (including real-HTTP contract tests against a local server), and the agent loop with the mock provider: *lookup → refund request → pending approval → approve → refund recorded*, plus rejection, step limit, unknown tools and provider failure.
+- **Stream unit (Jest):** `StreamBus` (fan-out, reconnect with one `resync`, listener heartbeat, shutdown) and `eventStream` (filtering, cap, ping, cleanup).
+- **Web unit:** the SSE parser and the fetch-based stream client (status changes, reconnect with backoff, idle detection, close), and the refresh helpers (latest-wins, single-flight). `npm test` at the root runs the API suite and then the web suite (`node:test` through `tsx`, no extra test framework).
 - Jest runs test files one at a time (`maxWorkers: 1`) because the e2e suites share one database.
 - **E2E:** the same approval flow over HTTP against real Postgres, plus input validation, reviewer-key and conversation-token access rules, the approval-time balance re-check and the `502` mapping. **It re-seeds the target database**, so point it at a disposable one.
+- **Stream e2e:** against real Postgres, `/events` and `/conversations/:id/events` deliver `trace` / `approvals` / `audit` to the right audience only, refuse bad credentials and malformed ids, enforce the caps (including for a differently-cased id), publish nothing for a rolled-back write, send `resync` after the `LISTEN` backend is killed, and end promptly on `app.close()`.
 - CI runs typecheck, tests (with a Postgres service container) and build on every push.
 
 Regenerate the README screenshots with the stack running: `npm run screenshot` (needs `npx playwright install chromium` once).
@@ -170,14 +183,25 @@ This is a **starter, not a production service**. What is and isn't protected:
 - **Approvals expire.** Pending approvals are auto-rejected after `APPROVAL_TTL_MINUTES`. The sweep runs in-process every minute, so it assumes a single API instance.
 - **Auto-approval is opt-in and cumulative.** With `REFUND_AUTO_APPROVE_UNDER` unset nothing is auto-approved. When set, the check counts earlier refunds on the order, so a large refund cannot be split into small ones; it does not cap refunds across a customer's different orders. The check is not atomic: two conversations of the same customer refunding the same order at the same instant can both pass it and briefly exceed the threshold, but the over-refund guard in `createRefund` still caps the total at the order total. The `auto_approved` event records the policy decision and is written before the refund runs; the refund does not run if the event cannot be written. If a guardrail inside `createRefund` then rejects the call, the log shows an auto-approval with no refund behind it.
 - **Audit log.** `approval_events` is append-only and written in the same transaction as the decision it records. If execution fails after a reviewer's decision is claimed and the reviewer retries, the log shows two decision rows for that one action; the history stays accurate rather than being rewritten. In the reviewer console the **Audit log** tab shows these events, and pending approval cards carry a short "why a human is needed" hint (reviewers only).
+- **Streams use the same auth as the REST API.** `/conversations/:id/events` needs the conversation token (or reviewer key) and `/events` needs the reviewer key, sent as headers, never in a URL. The same guards run before the stream opens, so a bad credential is an ordinary `401`. Events carry no content (only a kind and a conversation id), customers never receive `approvals` or `audit` signals, and streams are capped per conversation and for the reviewer (`429`).
 - **Customers never see the policy.** The customer view of `GET /conversations/:id` omits the policy fields (`policyRule`, `policyDetail`), so the threshold and the rule that applied are visible to reviewers only.
 - **Crash recovery.** If the process dies after a reviewer's decision is claimed but before it is carried out, the same minute-by-minute pass finishes it once the claim is five minutes old (even with expiry disabled). Refunds are idempotent per approval, so a refund that had already committed is never paid twice.
 - **Input limits.** Messages are trimmed, must be 1-2000 characters, and may not contain NUL (Postgres text cannot hold it); tool ids are bounded to the database's integer range. Bad values are a `400` at the edge instead of a failed run.
 - **Provider replies.** A body that is not JSON, one cut off mid-read, or an empty model reply becomes a `502` and a failed run (an empty reply is kept in the trace, flagged `EMPTY_RESPONSE`, with its tokens counted, but never replayed to the model).
 
+## Known limitations
+
+- **Events are hints, not a log.** There is no replay and no `Last-Event-ID` (the per-connection `id:` the server adds is ignored); a client that was disconnected just refetches.
+- **No token-by-token text.** A model reply appears whole when its step is saved.
+- **Stream caps are per process**, so with several API replicas the effective cap is multiplied.
+- **There is no global cap on open streams.** Only the per-conversation and reviewer caps exist, and `POST /conversations` is unauthenticated (though throttled), so a client can open many conversations and hold a stream on each.
+- **Many tabs can queue requests on plain HTTP/1.1.** Each open tab holds one of a browser's ~6 connections per host for its stream, so with many tabs other requests may wait for a free one. HTTP/2 avoids this.
+- **The manual browser check is not automated.** The live-update UI (the top-bar chip, chat and console refresh, the polling fallback) has no browser test, so check it by hand after changing it.
+- **`LISTEN` needs a session-mode Postgres connection.** A transaction-pooling proxy such as PgBouncer in transaction mode breaks it (notifications are not delivered). Point `DATABASE_URL` at Postgres directly, or at a session-mode pool.
+
 ## Next steps
 
-- Stream runs to the UI over SSE instead of polling.
+- Stream model tokens as they are generated (SSE currently only signals saved changes).
 - Real identity: customer login (so the customer comes from a session, not the request body), per-reviewer accounts, and four-eyes approval (see Security notes); decisions are already logged, but the log does not yet say *which* reviewer decided.
 - Run steps as a background job (queue) so long agent runs don't hold an HTTP request open.
 - Prompt-injection and eval suites; replay recorded traces against new prompts or models.
