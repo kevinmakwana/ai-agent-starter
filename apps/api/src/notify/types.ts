@@ -21,6 +21,8 @@ export interface ApprovalNote {
 
 export interface Channel {
   name: string;
+  /** Per-attempt allowance in ms; the notifier's own default applies when absent. */
+  timeoutMs?: number;
   /** Throws on failure; the message must be safe to log (no URLs, secrets). Honour `signal`. */
   send(note: ApprovalNote, signal: AbortSignal): Promise<void>;
   close?(): void | Promise<void>;

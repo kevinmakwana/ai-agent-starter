@@ -29,7 +29,7 @@ async function until(check: () => boolean | Promise<boolean>, ms = 3000): Promis
 
 interface Hit { headers: http.IncomingHttpHeaders; body: string }
 
-const AGENT_LISTENERS = "SELECT count(*)::int AS n FROM pg_stat_activity WHERE application_name = 'agent-events-listener'";
+const AGENT_LISTENERS = "SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND application_name = 'agent-events-listener'";
 
 maybe('reviewer notifications (e2e, real Postgres)', () => {
   const apps: INestApplication[] = [];

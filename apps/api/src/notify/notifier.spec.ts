@@ -105,6 +105,34 @@ describe('Notifier delivery', () => {
     expect(logs).toEqual(['Notification via webhook failed for approval a1: timed out']);
   });
 
+  it('gives a channel its own per-attempt timeout instead of the notifier default', async () => {
+    const send = jest.fn(async () => { await new Promise<void>((resolve) => { setTimeout(resolve, 60).unref(); }); });
+    const slow: Channel = { name: 'email', timeoutMs: 500, send };
+    const fast = { name: 'webhook', send: jest.fn(send) };
+    const { notifier, logs } = setup({
+      store: fakeStore([row('a1')]).store, channels: [slow, fast], timeoutMs: 20, backoffMs: [], sleep: async () => {},
+    });
+    await notifier.runOnce();
+    // The 60 ms send outlives the 20 ms default (webhook) but not the 500 ms channel allowance (email).
+    expect(logs).toEqual(['Notification via webhook failed for approval a1: timed out']);
+  });
+
+  it('uses the notifier timeout when the channel has none', async () => {
+    const send = jest.fn(() => new Promise<void>(() => undefined));
+    const { notifier, logs } = setup({
+      store: fakeStore([row('a1')]).store, channels: [{ name: 'webhook', send }], timeoutMs: 20, backoffMs: [], sleep: async () => {},
+    });
+    await notifier.runOnce();
+    expect(logs).toEqual(['Notification via webhook failed for approval a1: timed out']);
+  });
+
+  it('claims 5 at a time by default', async () => {
+    const { store, state } = fakeStore();
+    const { notifier } = setup({ store });
+    await notifier.runOnce();
+    expect(state.limits).toEqual([5]);
+  });
+
   it('logs a failed claim and does not throw', async () => {
     const store: NotifyStore = { claimUnnotified: async () => { throw new Error('db down'); } };
     const { notifier, logs } = setup({ store });
@@ -121,6 +149,49 @@ describe('Notifier delivery', () => {
     expect(state.calls).toBe(3);
     expect(state.limits).toEqual([2, 2, 2]);
     expect(ch.send).toHaveBeenCalledTimes(5);
+  });
+});
+
+describe('Notifier request() never leaks a rejection', () => {
+  it('logs and carries on when a pass throws, so nothing becomes an unhandled rejection', async () => {
+    // A null row makes buildNote throw inside the pass, which runOnce does not guard.
+    const { notifier, logs } = setup({ store: fakeStore([null as unknown as ClaimedAction]).store, channels: [okChannel('webhook')] });
+    notifier.request();
+    await expect(notifier['running']).resolves.toBeUndefined();
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toMatch(/^Notification pass failed: /);
+    expect(notifier['running']).toBeUndefined();
+  });
+
+  it('still runs the follow-up pass after a pass that threw', async () => {
+    const ch = okChannel('webhook');
+    const { store } = fakeStore([null as unknown as ClaimedAction], [row('a1')]);
+    const { notifier } = setup({ store, channels: [ch] });
+    notifier.request();
+    notifier.request();
+    while (notifier['running']) await notifier['running'];
+    expect(ch.send).toHaveBeenCalledTimes(1);
+  });
+
+  it('survives a store whose claim throws synchronously or asynchronously', async () => {
+    for (const claimUnnotified of [
+      (() => { throw new Error('sync boom'); }) as unknown as NotifyStore['claimUnnotified'],
+      async () => { throw new Error('async boom'); },
+    ]) {
+      const { notifier, logs } = setup({ store: { claimUnnotified } });
+      notifier.request();
+      await expect(notifier['running']).resolves.toBeUndefined();
+      expect(logs).toHaveLength(1);
+      expect(logs[0]).toMatch(/^Could not check for new approvals: (sync|async) boom$/);
+    }
+  });
+
+  it('survives a channel whose send throws synchronously', async () => {
+    const bad: Channel = { name: 'webhook', send: (() => { throw new Error('sync send'); }) as unknown as Channel['send'] };
+    const { notifier, logs } = setup({ store: fakeStore([row('a1')]).store, channels: [bad], backoffMs: [] });
+    notifier.request();
+    await expect(notifier['running']).resolves.toBeUndefined();
+    expect(logs).toEqual(['Notification via webhook failed for approval a1: sync send']);
   });
 });
 

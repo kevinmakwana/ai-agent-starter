@@ -17,7 +17,7 @@ export interface NotifierOptions {
   consoleUrl: string;
   log?: { warn(message: string): void };
   sleep?: (ms: number) => Promise<void>;
-  /** Per attempt. */
+  /** Per attempt, unless the channel sets its own `timeoutMs`. */
   timeoutMs?: number;
   /** Waits between attempts, so `[1000, 4000]` means 3 attempts. */
   backoffMs?: number[];
@@ -69,7 +69,7 @@ export class Notifier {
     this.sleep = opts.sleep ?? defaultSleep;
     this.timeoutMs = opts.timeoutMs ?? 5000;
     this.backoffMs = opts.backoffMs ?? [1000, 4000];
-    this.batch = opts.batch ?? 20;
+    this.batch = opts.batch ?? 5;
     this.sweepMs = opts.sweepMs ?? 60_000;
     this.debounceMs = opts.debounceMs ?? 200;
     this.stopSignal = new Promise<void>((resolve) => { this.signalStop = resolve; });
@@ -107,10 +107,12 @@ export class Notifier {
   request(): void {
     if (this.stopped) return;
     if (this.running) { this.again = true; return; }
-    this.running = this.drain().finally(() => {
-      this.running = undefined;
-      if (this.again) { this.again = false; this.request(); }
-    });
+    this.running = this.drain()
+      .catch((e) => { this.log.warn(`Notification pass failed: ${safe(e)}`); })
+      .finally(() => {
+        this.running = undefined;
+        if (this.again) { this.again = false; this.request(); }
+      });
   }
 
   start(bus: { subscribe(l: (e: AgentEvent) => void): () => void }): void {
@@ -153,7 +155,7 @@ export class Notifier {
     for (let attempt = 0; attempt <= this.backoffMs.length; attempt++) {
       if (this.stopped) break;
       try {
-        const signal = AbortSignal.timeout(this.timeoutMs);
+        const signal = AbortSignal.timeout(channel.timeoutMs ?? this.timeoutMs);
         // Raced against the signal too, so a channel that ignores it cannot hang the pass.
         await abortable(signal, () => channel.send(note, signal));
         return;

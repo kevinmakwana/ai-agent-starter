@@ -15,6 +15,55 @@ const fakeTransport = (sendMail: () => Promise<unknown>) => {
   return { transport: { sendMail, close } as unknown as nodemailer.Transporter, close };
 };
 
+/** The options nodemailer built for a channel created from a URL (the transporter is reached through `close`'s owner). */
+function builtOptions(smtpUrl: string): Record<string, unknown> {
+  const spy = jest.spyOn(nodemailer, 'createTransport');
+  try {
+    emailChannel({ ...options, smtpUrl });
+    const transporter = spy.mock.results[0].value as nodemailer.Transporter;
+    return (transporter.transporter as unknown as { options: Record<string, unknown> }).options;
+  } finally {
+    spy.mockRestore();
+  }
+}
+
+describe('emailChannel transport', () => {
+  it.each([
+    'smtp://u:p@smtp.example.com:587',
+    'SMTP://u:p@SMTP.Example.com',
+    'smtp://u:p@localhost.evil.com:25',
+    'smtp://u:p@10.0.0.5:25',
+  ])('requires STARTTLS for the remote plaintext-start host %s', (url) => {
+    expect(builtOptions(url).requireTLS).toBe(true);
+  });
+
+  it.each([
+    'smtp://localhost:1025',
+    'smtp://LOCALHOST:1025',
+    'smtp://127.0.0.1:1025',
+    'smtp://[::1]:1025',
+    'smtps://u:p@smtp.example.com:465',
+  ])('does not force STARTTLS for %s', (url) => {
+    expect(builtOptions(url).requireTLS).toBeFalsy();
+  });
+
+  it('keeps the 5 s network timeouts and never turns on logging', () => {
+    const o = builtOptions('smtp://u:p@smtp.example.com:587');
+    expect(o).toMatchObject({ connectionTimeout: 5000, greetingTimeout: 5000, socketTimeout: 5000, dnsTimeout: 5000 });
+    expect(o.logger).toBeFalsy();
+    expect(o.debug).toBeFalsy();
+    expect(o.transactionLog).toBeFalsy();
+  });
+
+  it('keeps TLS from the start for smtps', () => {
+    expect(builtOptions('smtps://u:p@smtp.example.com:465')).toMatchObject({ secure: true, port: 465 });
+  });
+
+  it('asks for a 20 s attempt allowance, longer than the notifier default', () => {
+    expect(emailChannel({ ...options, transport: nodemailer.createTransport({ jsonTransport: true }) }).timeoutMs).toBe(20_000);
+  });
+});
+
 describe('emailChannel', () => {
   it('sends one plain-text message to every recipient', async () => {
     const transport = nodemailer.createTransport({ jsonTransport: true });
