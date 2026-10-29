@@ -3,7 +3,7 @@ import http, { type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { type INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import type { Pool } from 'pg';
+import { Pool } from 'pg';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { PgAgentStore } from '../src/db/pg-agent.store';
@@ -19,9 +19,9 @@ const maybe = process.env.E2E_DATABASE_URL ? describe : describe.skip;
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /** Polls until `check` is true, failing at the deadline instead of hanging. */
-async function until(check: () => boolean, ms = 3000): Promise<void> {
+async function until(check: () => boolean | Promise<boolean>, ms = 3000): Promise<void> {
   const deadline = Date.now() + ms;
-  while (!check()) {
+  while (!(await check())) {
     if (Date.now() > deadline) throw new Error(`condition not met within ${ms} ms`);
     await sleep(25);
   }
@@ -29,22 +29,34 @@ async function until(check: () => boolean, ms = 3000): Promise<void> {
 
 interface Hit { headers: http.IncomingHttpHeaders; body: string }
 
+const AGENT_LISTENERS = "SELECT count(*)::int AS n FROM pg_stat_activity WHERE application_name = 'agent-events-listener'";
+
 maybe('reviewer notifications (e2e, real Postgres)', () => {
   const apps: INestApplication[] = [];
   const servers: Server[] = [];
   let savedEnv: NodeJS.ProcessEnv;
+  /** Independent of any app under test, so it can reset and inspect the database while apps are booting or closed. */
+  let admin: Pool;
+
+  beforeAll(() => { admin = new Pool({ connectionString: process.env.E2E_DATABASE_URL, max: 2 }); });
+  afterAll(() => admin.end());
 
   /** A local receiver on a free port that records every request and answers with `receiver.status`. */
   const startReceiver = async () => {
     const hits: Hit[] = [];
     const receiver = {
       hits, status: 200, url: '',
+      /** When set, the next request is recorded but left unanswered until `answerHeld()`. */
+      holdNext: false,
+      held: [] as http.ServerResponse[],
+      answerHeld() { for (const res of this.held.splice(0)) { res.statusCode = this.status; res.end('{}'); } },
     };
     const server = http.createServer((req, res) => {
       const chunks: Buffer[] = [];
       req.on('data', (c: Buffer) => chunks.push(c));
       req.on('end', () => {
         hits.push({ headers: req.headers, body: Buffer.concat(chunks).toString('utf8') });
+        if (receiver.holdNext) { receiver.holdNext = false; receiver.held.push(res); return; }
         res.statusCode = receiver.status;
         res.end('{}');
       });
@@ -65,10 +77,13 @@ maybe('reviewer notifications (e2e, real Postgres)', () => {
     await app.init();
     return app;
   };
+  /**
+   * Resets the database BEFORE the app boots: a notifier that is switched on announces whatever is pending the moment it
+   * starts, so rows left by an earlier run must be gone by then.
+   */
   const bootAndSeed = async () => {
-    const app = await boot();
-    await seedDatabase(app.get(PG_POOL));
-    return app;
+    await seedDatabase(admin);
+    return boot();
   };
 
   /** Starts a conversation for customer 1 and parks a refund. */
@@ -85,13 +100,18 @@ maybe('reviewer notifications (e2e, real Postgres)', () => {
     for (const key of Object.keys(process.env)) if (key.startsWith('NOTIFY_') || key === 'REVIEWER_CONSOLE_URL') delete process.env[key];
   });
   afterEach(async () => {
-    await Promise.all(apps.splice(0).map((app) => app.close()));
-    await Promise.all(servers.splice(0).map((server) => new Promise<void>((resolve) => {
-      server.close(() => resolve());
-      server.closeAllConnections();
-    })));
-    for (const key of Object.keys(process.env)) if (!(key in savedEnv)) delete process.env[key];
-    Object.assign(process.env, savedEnv);
+    try {
+      await Promise.allSettled(apps.splice(0).map((app) => app.close()));
+      await Promise.allSettled(servers.splice(0).map((server) => new Promise<void>((resolve) => {
+        server.close(() => resolve());
+        server.closeAllConnections();
+      })));
+      // leave no pending rows behind for whatever runs next
+      await Promise.allSettled([admin.query('DELETE FROM conversations')]);
+    } finally {
+      for (const key of Object.keys(process.env)) if (!(key in savedEnv)) delete process.env[key];
+      Object.assign(process.env, savedEnv);
+    }
   });
 
   describe('claiming in the store', () => {
@@ -154,11 +174,14 @@ maybe('reviewer notifications (e2e, real Postgres)', () => {
       await park();
       const seen: string[] = [];
       const listener = await pool.connect();
-      await listener.query('LISTEN agent_events');
-      listener.on('notification', (n) => seen.push(n.payload ?? ''));
-      await store.claimUnnotified(10);
-      await sleep(150);
-      listener.release();
+      try {
+        await listener.query('LISTEN agent_events');
+        listener.on('notification', (n) => seen.push(n.payload ?? ''));
+        await store.claimUnnotified(10);
+        await sleep(150);
+      } finally {
+        listener.release(true); // destroyed, so no LISTEN survives in the pool
+      }
       expect(seen).toEqual([]);
     });
 
@@ -194,6 +217,8 @@ maybe('reviewer notifications (e2e, real Postgres)', () => {
       expect(['id', 'tool', 'orderId', 'amount', 'rule', 'createdAt', 'consoleUrl']).toEqual(expect.arrayContaining(keys));
       expect(keys).toEqual(expect.arrayContaining(['id', 'tool', 'orderId', 'rule']));
       expect(payload.approval).toMatchObject({ tool: 'issue_refund', orderId: 1, consoleUrl: expect.stringContaining('http://localhost:3000/reviewer') });
+      const stored = (await admin.query('SELECT tool_args FROM actions WHERE id = $1', [payload.approval.id])).rows[0].tool_args;
+      expect(stored.reason).toContain('damaged'); // so the absence check below is not vacuous
       for (const leaked of ['Ava', 'ava.brooks@example.com', 'damaged', conversationId]) expect(hit.body).not.toContain(leaked);
 
       const timestamp = hit.headers['x-timestamp'] as string;
@@ -211,8 +236,10 @@ maybe('reviewer notifications (e2e, real Postgres)', () => {
     it('announces an approval once even with two replicas listening', async () => {
       const receiver = await startReceiver();
       process.env.NOTIFY_WEBHOOK_URL = receiver.url;
+      await until(async () => (await admin.query(AGENT_LISTENERS)).rows[0].n === 0); // nothing left over from earlier apps
       const first = await bootAndSeed();
       await boot();
+      await until(async () => (await admin.query(AGENT_LISTENERS)).rows[0].n === 2); // both replicas are listening
 
       await parkRefund(first);
       await until(() => receiver.hits.length >= 1);
@@ -244,6 +271,47 @@ maybe('reviewer notifications (e2e, real Postgres)', () => {
       expect(receiver.hits).toHaveLength(3);
     });
 
+    it('on shutdown, gives back the rows it had claimed but not started, and keeps the one it was delivering', async () => {
+      const receiver = await startReceiver();
+      process.env.NOTIFY_WEBHOOK_URL = receiver.url;
+      const app = await bootAndSeed();
+      const store = app.get(PgAgentStore);
+      receiver.holdNext = true; // the first delivery hangs, holding the pass open
+
+      const park = async (orderId: number) => {
+        const conv = await store.createConversation(1, 't');
+        const run = await store.createRun(conv.id);
+        return store.createAction({
+          runId: run.id, conversationId: conv.id, toolName: 'issue_refund', toolArgs: { orderId, amount: 18.75 },
+          toolCallId: 'call_1', reasoning: 'r', policy: { rule: 'over_threshold', detail: {} },
+        });
+      };
+      const [a, b] = await Promise.all([park(1), park(2)]);
+      const notified = async (id: string) =>
+        (await admin.query('SELECT notified_at FROM actions WHERE id = $1', [id])).rows[0].notified_at !== null;
+
+      await until(() => receiver.hits.length === 1);
+      // one batch claimed both rows; the second is waiting behind the held delivery
+      await until(async () => (await notified(a.id)) && (await notified(b.id)));
+      const delivered = JSON.parse(receiver.hits[0].body).approval.id as string;
+      const skipped = delivered === a.id ? b.id : a.id;
+
+      const stopSpy = jest.spyOn(Notifier.prototype, 'stop');
+      try {
+        const closing = app.close();
+        await until(() => stopSpy.mock.calls.length === 1); // stop() sets its flag synchronously when called
+        await sleep(0);
+        receiver.answerHeld();
+        await closing;
+      } finally {
+        stopSpy.mockRestore();
+      }
+
+      expect(receiver.hits).toHaveLength(1); // the skipped row was never attempted
+      expect(await notified(delivered)).toBe(true);
+      expect(await notified(skipped)).toBe(false);
+    });
+
     it('is off by default: with nothing configured nothing is claimed', async () => {
       const receiver = await startReceiver();
       const app = await bootAndSeed();
@@ -252,6 +320,28 @@ maybe('reviewer notifications (e2e, real Postgres)', () => {
       const { rows } = await app.get<Pool>(PG_POOL).query("SELECT notified_at FROM actions WHERE status = 'pending_approval'");
       expect(rows).toEqual([{ notified_at: null }]);
       expect(receiver.hits).toHaveLength(0);
+    });
+  });
+
+  describe('who sees notifiedAt', () => {
+    it('is reviewer-only: customers never see it on their conversation trace', async () => {
+      process.env.REVIEWER_API_KEY = 's3cret';
+      const app = await bootAndSeed();
+      const api = () => request(app.getHttpServer());
+      const created = await api().post('/conversations').send({ customerId: 1 }).expect(201);
+      const token = { 'X-Conversation-Token': created.body.accessToken as string };
+      await api().post(`/conversations/${created.body.id}/messages`).set(token).send({ content: 'refund order #1' }).expect(201);
+
+      const asCustomer = (await api().get(`/conversations/${created.body.id}`).set(token).expect(200)).body;
+      expect(asCustomer.approvals).toHaveLength(1);
+      expect(asCustomer.approvals[0]).not.toHaveProperty('notifiedAt');
+      expect(JSON.stringify(asCustomer)).not.toContain('notifiedAt');
+
+      const reviewer = { Authorization: 'Bearer s3cret' };
+      const listed = (await api().get('/approvals?status=pending').set(reviewer).expect(200)).body;
+      expect(listed[0]).toHaveProperty('notifiedAt', null); // reviewers still get it
+      const asReviewer = (await api().get(`/conversations/${created.body.id}`).set(reviewer).expect(200)).body;
+      expect(asReviewer.approvals[0]).toHaveProperty('notifiedAt', null);
     });
   });
 });

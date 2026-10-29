@@ -303,14 +303,14 @@ export class PgAgentStore implements AgentStore {
     const { rows } = await this.pool.query(
       `WITH picked AS (
          SELECT id FROM actions WHERE status = 'pending_approval' AND notified_at IS NULL
-         ORDER BY created_at LIMIT $1 FOR UPDATE SKIP LOCKED
+         ORDER BY created_at, id LIMIT $1 FOR UPDATE SKIP LOCKED
        ), claimed AS (
          UPDATE actions a SET notified_at = now() FROM picked p WHERE a.id = p.id
          RETURNING a.id, a.tool_name, a.tool_args, a.created_at
        )
        SELECT c.id, c.tool_name, c.tool_args, c.created_at,
               (SELECT e.rule FROM approval_events e WHERE e.action_id = c.id AND e.kind = 'requested' ORDER BY e.id LIMIT 1) AS rule
-       FROM claimed c ORDER BY c.created_at`,
+       FROM claimed c ORDER BY c.created_at, c.id`,
       [limit],
     );
     return rows.map((r) => ({
