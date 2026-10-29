@@ -27,10 +27,10 @@ Success criteria:
 
 ## 1. Trigger and claim
 
-- `actions.notified_at timestamptz` (added with `ALTER TABLE … ADD COLUMN IF NOT EXISTS`). Existing rows are
-  backfilled to `created_at` once by the same idempotent DDL (`UPDATE actions SET notified_at = created_at WHERE
-  notified_at IS NULL AND status <> 'pending_approval'`), so an upgrade does not announce old, already-decided actions.
-  Pending ones at upgrade time are announced once, which is the desired behaviour.
+- `actions.notified_at timestamptz` (added with `ALTER TABLE … ADD COLUMN IF NOT EXISTS`) and a partial index on
+  `created_at` where `status = 'pending_approval' AND notified_at IS NULL`. No backfill is needed: only pending actions are
+  ever claimed, so old decided rows are never announced. Pending ones at upgrade time are announced once, which is the
+  desired behaviour.
 - `PgAgentStore.claimUnnotified(limit)`: one statement,
   `UPDATE actions SET notified_at = now() WHERE id IN (SELECT id FROM actions WHERE status = 'pending_approval' AND
   notified_at IS NULL ORDER BY created_at LIMIT $1 FOR UPDATE SKIP LOCKED) RETURNING …`. Atomic and safe across
