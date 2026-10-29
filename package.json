@@ -23,7 +23,7 @@
     "screenshot": "node scripts/screenshot.mjs"
   },
   "devDependencies": {
-    "concurrently": "^9.2.0",
-    "playwright": "^1.55.0"
+    "concurrently": "^10.0.6",
+    "playwright": "^1.64.1"
   }
 }
