@@ -5,6 +5,7 @@ import type {
   Action, ActionStatus, AgentStore, ApprovalEvent, Conversation, DecisionAudit, NewAction, NewApprovalEvent, NewStep, Run, RunMeta, Step,
 } from '../agent/types';
 import { AGENT_EVENTS_CHANNEL, type AgentEventKind, encodeEvent } from '../events/agent-events';
+import type { ClaimedAction } from '../notify/types';
 import { camel } from './pool';
 
 const hashToken = (token: string) => createHash('sha256').update(token).digest('hex');
@@ -291,6 +292,37 @@ export class PgAgentStore implements AgentStore {
       const { rows } = await db.query('UPDATE actions SET result = $2 WHERE id = $1 RETURNING conversation_id', [id, JSON.stringify(result)]);
       if (rows[0]) await this.publish(db, rows[0].conversation_id, 'trace', 'approvals');
     });
+  }
+
+  /**
+   * Marks up to `limit` pending, not-yet-announced actions as announced and returns them, oldest first. One statement:
+   * `SKIP LOCKED` lets concurrent replicas claim disjoint rows, and the claim commits before any delivery (at most once).
+   * Sends no change signal: a notified_at change is not something a viewer needs to see.
+   */
+  async claimUnnotified(limit: number): Promise<ClaimedAction[]> {
+    const { rows } = await this.pool.query(
+      `WITH picked AS (
+         SELECT id FROM actions WHERE status = 'pending_approval' AND notified_at IS NULL
+         ORDER BY created_at LIMIT $1 FOR UPDATE SKIP LOCKED
+       ), claimed AS (
+         UPDATE actions a SET notified_at = now() FROM picked p WHERE a.id = p.id
+         RETURNING a.id, a.tool_name, a.tool_args, a.created_at
+       )
+       SELECT c.id, c.tool_name, c.tool_args, c.created_at,
+              (SELECT e.rule FROM approval_events e WHERE e.action_id = c.id AND e.kind = 'requested' ORDER BY e.id LIMIT 1) AS rule
+       FROM claimed c ORDER BY c.created_at`,
+      [limit],
+    );
+    return rows.map((r) => ({
+      id: r.id, toolName: r.tool_name, toolArgs: r.tool_args, createdAt: new Date(r.created_at).toISOString(), rule: r.rule ?? null,
+    }));
+  }
+
+  /** Undoes a claim for rows whose notification was never started, so they are announced later. Decided rows are left alone. */
+  async releaseClaims(ids: string[]): Promise<void> {
+    if (ids.length === 0) return;
+    await this.pool.query(
+      "UPDATE actions SET notified_at = NULL WHERE id = ANY($1::uuid[]) AND status = 'pending_approval'", [ids]);
   }
 
   async listActions(status?: ActionStatus): Promise<Action[]> {

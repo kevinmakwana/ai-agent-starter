@@ -86,6 +86,10 @@ CREATE TABLE IF NOT EXISTS actions (
   decided_at timestamptz
 );
 CREATE INDEX IF NOT EXISTS actions_status_idx ON actions (status);
+-- Set when a reviewer notification was claimed for the action (at most once), so replicas never announce it twice.
+ALTER TABLE actions ADD COLUMN IF NOT EXISTS notified_at timestamptz;
+CREATE INDEX IF NOT EXISTS actions_unnotified_idx ON actions (created_at)
+  WHERE status = 'pending_approval' AND notified_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS refunds (
   id serial PRIMARY KEY,

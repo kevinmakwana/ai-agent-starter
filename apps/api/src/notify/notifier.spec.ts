@@ -124,6 +124,86 @@ describe('Notifier delivery', () => {
   });
 });
 
+describe('Notifier release on stop', () => {
+  const releasingStore = (...batches: ClaimedAction[][]) => {
+    const { store } = fakeStore(...batches);
+    const release = jest.fn(async (_ids: string[]) => undefined);
+    return { store: { ...store, release } as NotifyStore, release };
+  };
+
+  it('releases rows it never started when stop() lands mid-pass, and never the one it attempted', async () => {
+    const { store, release } = releasingStore([row('a1'), row('a2'), row('a3')]);
+    let stopping: Promise<void> | undefined;
+    const ch: Channel = { name: 'webhook', send: jest.fn(async () => { stopping = notifier.stop(); }) };
+    const { notifier } = setup({ store, channels: [ch] });
+    await expect(notifier.runOnce()).resolves.toBe(3);
+    await stopping;
+    expect(ch.send).toHaveBeenCalledTimes(1);
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(release).toHaveBeenCalledWith(['a2', 'a3']);
+  });
+
+  it('releases every claimed row when stop() lands during the claim', async () => {
+    let finishClaim!: (rows: ClaimedAction[]) => void;
+    const release = jest.fn(async (_ids: string[]) => undefined);
+    const store: NotifyStore = { claimUnnotified: () => new Promise((r) => (finishClaim = r)), release };
+    const ch = okChannel('webhook');
+    const { notifier } = setup({ store, channels: [ch] });
+    const pass = notifier.runOnce();
+    await Promise.resolve();
+    const stopping = notifier.stop();
+    finishClaim([row('a1'), row('a2')]);
+    await expect(pass).resolves.toBe(2);
+    await stopping;
+    expect(ch.send).not.toHaveBeenCalled();
+    expect(release).toHaveBeenCalledWith(['a1', 'a2']);
+  });
+
+  it('does not release when every claimed row was started', async () => {
+    const { store, release } = releasingStore([row('a1'), row('a2')]);
+    const ch = okChannel('webhook');
+    const { notifier } = setup({ store, channels: [ch] });
+    await notifier.runOnce();
+    await notifier.stop();
+    expect(ch.send).toHaveBeenCalledTimes(2);
+    expect(release).not.toHaveBeenCalled();
+  });
+
+  it('does not release a row whose retries were cut short by stop()', async () => {
+    const { store, release } = releasingStore([row('a1')]);
+    const send = jest.fn(async () => { throw new Error('nope'); });
+    const { notifier } = setup({ store, channels: [{ name: 'webhook', send }], sleep: () => new Promise<void>(() => undefined) });
+    const pass = notifier.runOnce();
+    await new Promise((r) => setImmediate(r));
+    await notifier.stop();
+    await pass;
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(release).not.toHaveBeenCalled();
+  });
+
+  it('logs a failed release without a URL and does not throw', async () => {
+    const release = jest.fn(async () => { throw new Error('POST https://db.example.com/secret refused'); });
+    let finishClaim!: (rows: ClaimedAction[]) => void;
+    const store: NotifyStore = { claimUnnotified: () => new Promise((r) => (finishClaim = r)), release };
+    const { notifier, logs } = setup({ store, channels: [okChannel('webhook')] });
+    const pass = notifier.runOnce();
+    await Promise.resolve();
+    const stopping = notifier.stop();
+    finishClaim([row('a1')]);
+    await expect(pass).resolves.toBe(1);
+    await stopping;
+    expect(logs).toEqual(['Could not release 1 unsent approval(s): POST [url] refused']);
+  });
+
+  it('works with a store that has no release', async () => {
+    const { store } = fakeStore([row('a1')]);
+    const { notifier } = setup({ store, channels: [okChannel('webhook')] });
+    const pass = notifier.runOnce();
+    await notifier.stop();
+    await expect(pass).resolves.toBe(1);
+  });
+});
+
 describe('Notifier triggers', () => {
   beforeEach(() => jest.useFakeTimers());
   afterEach(() => jest.useRealTimers());

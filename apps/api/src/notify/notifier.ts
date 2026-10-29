@@ -7,6 +7,8 @@ import type { ApprovalNote, Channel, ClaimedAction } from './types';
 export interface NotifyStore {
   /** Marks up to `limit` pending, not-yet-announced actions as announced and returns them. */
   claimUnnotified(limit: number): Promise<ClaimedAction[]>;
+  /** Gives claimed rows back so a later pass (or another replica) announces them. Only for rows no delivery began for. */
+  release?(ids: string[]): Promise<void>;
 }
 
 export interface NotifierOptions {
@@ -34,6 +36,8 @@ const safe = (err: unknown): string =>
 /**
  * Announces new pending approvals. Each pass claims a batch (the claim commits first, so delivery is at most once)
  * and sends every note to every channel. Channels fail, retry and time out independently, and a pass never throws.
+ * Rows claimed but not yet started when `stop()` lands are released for the next process; a row whose delivery began
+ * counts as attempted and is never released.
  * Passes never overlap: a trigger during a pass sets one follow-up pass.
  */
 export class Notifier {
@@ -81,12 +85,22 @@ export class Notifier {
       this.log.warn(`Could not check for new approvals: ${safe(e)}`);
       return 0;
     }
-    for (const row of rows) {
-      if (this.stopped) break;
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      if (this.stopped) { await this.release(rows.slice(i)); break; }
       const note = buildNote(row, this.consoleUrl);
       await Promise.allSettled(this.channels.map((channel) => this.deliver(channel, note)));
     }
     return rows.length;
+  }
+
+  /** Best effort: a row that cannot be released stays marked as announced. */
+  private async release(skipped: ClaimedAction[]): Promise<void> {
+    try {
+      await this.store.release?.(skipped.map((r) => r.id));
+    } catch (e) {
+      this.log.warn(`Could not release ${skipped.length} unsent approval(s): ${safe(e)}`);
+    }
   }
 
   /** Asks for a pass. Calls during a pass coalesce into one follow-up pass. */
