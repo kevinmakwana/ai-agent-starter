@@ -39,7 +39,7 @@
 - [x] 4.3 Audit log of approval decisions, shown in the reviewer console.
 - [ ] 4.4 Reviewer notifications on new pending approvals (webhook, then email/Slack).
 - [ ] 4.5 Per-reviewer accounts, four-eyes rule, then customer login.
-- [ ] 4.6 More tools: `cancel_order` (risky), `track_shipment`.
+- [x] 4.6 More tools: `cancel_order` (risky), `track_shipment`.
 
 ## Phase 5: Tooling and operations
 - [ ] 5.1 ESLint, Prettier, `.editorconfig` and a lint step in CI.

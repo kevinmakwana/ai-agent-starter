@@ -43,6 +43,16 @@ describe('evaluateApproval for issue_refund', () => {
 
 describe('evaluateApproval for other tools', () => {
   it('sends an unknown risky tool to a human', () => {
-    expect(evaluateApproval('cancel_order', { orderId: 1 }, {}, cfg(1000))).toEqual({ mode: 'human', rule: 'default', detail: {} });
+    expect(evaluateApproval('delete_everything', { orderId: 1 }, {}, cfg(1000))).toEqual({ mode: 'human', rule: 'default', detail: {} });
+  });
+});
+
+describe('evaluateApproval for cancel_order', () => {
+  it('always goes to a human, whatever the refund threshold', () => {
+    for (const threshold of [0, 25, 1_000_000]) {
+      expect(evaluateApproval('cancel_order', { orderId: 1, reason: 'changed my mind' }, {}, cfg(threshold))).toEqual({
+        mode: 'human', rule: 'tool_requires_review', detail: {},
+      });
+    }
   });
 });

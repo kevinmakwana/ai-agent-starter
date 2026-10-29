@@ -8,6 +8,8 @@ describe('tool input schemas', () => {
       get_order: { orderId: 7 },
       create_ticket: { subject: 'Late parcel', body: 'It has not arrived.' },
       issue_refund: { orderId: 7, amount: 12.5, reason: 'Arrived damaged' },
+      track_shipment: { orderId: 7 },
+      cancel_order: { orderId: 7, reason: 'Ordered by mistake' },
     };
     for (const t of TOOLS) expect(validateToolInput(t.name, valid[t.name])).toEqual({ ok: true });
   });
@@ -26,6 +28,13 @@ describe('tool input schemas', () => {
     ['issue_refund', { orderId: 1, amount: 5 }],
     ['issue_refund', { orderId: 1, amount: 5, reason: 'because', extra: true }],
     ['get_order', 'not an object'],
+    ['track_shipment', {}],
+    ['track_shipment', { orderId: 0 }],
+    ['track_shipment', { orderId: 1, customerId: 1 }],
+    ['cancel_order', { orderId: 1 }],
+    ['cancel_order', { orderId: 1, reason: 'no' }],
+    ['cancel_order', { orderId: 1, reason: 'because', extra: true }],
+    ['cancel_order', { orderId: 2 ** 31, reason: 'because' }],
   ])('rejects invalid arguments: %s %j', (tool, args) => {
     const r = validateToolInput(tool, args);
     expect(r.ok).toBe(false);
@@ -44,8 +53,8 @@ describe('tool input schemas', () => {
     expect(validateToolInput('drop_database', {})).toEqual({ ok: false, errors: ['Unknown tool "drop_database"'] });
   });
 
-  it('exposes only issue_refund as risky and a JSON schema for each tool', () => {
-    expect(TOOLS.filter((t) => t.risky).map((t) => t.name)).toEqual(['issue_refund']);
+  it('exposes only issue_refund and cancel_order as risky, and a JSON schema for each tool', () => {
+    expect(TOOLS.filter((t) => t.risky).map((t) => t.name)).toEqual(['issue_refund', 'cancel_order']);
     for (const s of toolSpecs()) expect(s.inputSchema).toMatchObject({ type: 'object', additionalProperties: false });
   });
 });

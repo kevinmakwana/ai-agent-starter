@@ -4,24 +4,37 @@ import type { Approval } from '@/lib/types';
 
 const usd = (n: number | null | undefined) => (n == null ? '—' : `$${n.toFixed(2)}`);
 
+const orderSuffix = (id: number | undefined) => (id != null ? ` · order #${id}` : '');
+
 function Card({ a, onDecide }: { a: Approval; onDecide: (id: string, d: 'approve' | 'reject', note: string) => Promise<void> }) {
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   const decide = async (d: 'approve' | 'reject') => { setBusy(true); try { await onDecide(a.id, d, note); } finally { setBusy(false); } };
   const remaining = a.orderTotal == null ? null : a.orderTotal - a.orderRefunded;
+  const cancel = a.toolName === 'cancel_order';
+  const refund = a.toolName === 'issue_refund';
+  const title = refund ? `Refund${orderSuffix(a.toolArgs.orderId)}` : cancel ? `Cancel order · #${a.toolArgs.orderId}` : `${a.toolName}${orderSuffix(a.toolArgs.orderId)}`;
   const why = a.status === 'pending_approval' ? describeRule(a.policyRule ?? null, a.policyDetail ?? null) : null;
   return (
     <article className="approval">
       <div className="approval-top">
-        <div><b>Refund · order #{a.toolArgs.orderId}</b><div className="muted">{a.customerName} · {a.customerEmail}</div></div>
-        <div className="amount">{usd(a.toolArgs.amount)}</div>
+        <div><b>{title}</b><div className="muted">{a.customerName} · {a.customerEmail}</div></div>
+        {refund && <div className="amount">{usd(a.toolArgs.amount)}</div>}
       </div>
       {why && <div className="chip warn why">{why}</div>}
-      <dl>
-        <dt>Order total</dt><dd>{usd(a.orderTotal)}</dd>
-        <dt>Already refunded</dt><dd>{usd(a.orderRefunded)}</dd>
-        <dt>Refundable now</dt><dd>{usd(remaining)}</dd>
-      </dl>
+      {cancel ? (
+        <dl>
+          <dt>Order status</dt><dd>{a.orderStatus ?? '—'}</dd>
+          <dt>Order total</dt><dd>{usd(a.orderTotal)}</dd>
+          <dt>Already refunded</dt><dd>{usd(a.orderRefunded)}</dd>
+        </dl>
+      ) : (
+        <dl>
+          <dt>Order total</dt><dd>{usd(a.orderTotal)}</dd>
+          <dt>Already refunded</dt><dd>{usd(a.orderRefunded)}</dd>
+          <dt>Refundable now</dt><dd>{usd(remaining)}</dd>
+        </dl>
+      )}
       {a.userMessage && <blockquote><span>Customer said</span>{a.userMessage}</blockquote>}
       <blockquote className="agent"><span>Agent reasoning</span>{a.reasoning}{a.toolArgs.reason && <em>Reason given: “{a.toolArgs.reason}”</em>}</blockquote>
       {a.status === 'pending_approval' ? (
@@ -42,7 +55,7 @@ export function ApprovalsPanel({ approvals, onDecide }: { approvals: Approval[];
   const decided = approvals.filter((a) => a.status !== 'pending_approval').slice(0, 5);
   return (
     <div className="approvals">
-      {pending.length === 0 && <div className="empty pad">Nothing waiting. Ask the agent for a refund to see one here.</div>}
+      {pending.length === 0 && <div className="empty pad">Nothing waiting. Ask the agent to refund or cancel an order to see one here.</div>}
       {pending.map((a) => <Card key={a.id} a={a} onDecide={onDecide} />)}
       {decided.length > 0 && <h3>Recently decided</h3>}
       {decided.map((a) => <Card key={a.id} a={a} onDecide={onDecide} />)}

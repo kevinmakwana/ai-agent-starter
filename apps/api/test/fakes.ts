@@ -1,7 +1,7 @@
 import { ConflictError, GuardrailViolation } from '../src/agent/errors';
-import { assertRefundable, assertSameCustomer } from '../src/agent/guardrails';
+import { assertCancellable, assertRefundable, assertSameCustomer } from '../src/agent/guardrails';
 import type {
-  Action, AgentStore, ApprovalEvent, Conversation, Customer, DecisionAudit, NewAction, NewApprovalEvent, NewStep, Order, Run, RunMeta, ShopRepo, Step, Ticket,
+  Action, AgentStore, ApprovalEvent, Conversation, Customer, DecisionAudit, NewAction, NewApprovalEvent, NewStep, Order, Run, RunMeta, Shipment, ShopRepo, Step, Ticket,
 } from '../src/agent/types';
 
 export const CUSTOMERS: Customer[] = [
@@ -17,12 +17,33 @@ export const ORDERS: Order[] = [
 ];
 
 export class MemoryShop implements ShopRepo {
+  // An instance copy, so cancelOrder never mutates the shared ORDERS other tests read.
+  orders: Order[] = ORDERS.map((o) => ({ ...o }));
+  shipments: Shipment[] = [
+    {
+      orderId: 2, carrier: 'UPS', trackingNumber: '1Z999AA10123456784', status: 'in_transit', eta: '2026-01-06T00:00:00.000Z',
+      events: [
+        { at: '2026-01-02T09:00:00.000Z', location: 'Reno, NV', description: 'Label created' },
+        { at: '2026-01-03T14:30:00.000Z', location: 'Reno, NV', description: 'Picked up by carrier' },
+        { at: '2026-01-04T08:15:00.000Z', location: 'Salt Lake City, UT', description: 'In transit' },
+      ],
+    },
+    {
+      orderId: 1, carrier: 'FedEx', trackingNumber: 'FX900000001', status: 'delivered', eta: '2026-01-04T00:00:00.000Z',
+      events: [
+        { at: '2025-12-28T09:00:00.000Z', location: 'Reno, NV', description: 'Label created' },
+        { at: '2025-12-30T11:00:00.000Z', location: 'Denver, CO', description: 'In transit' },
+        { at: '2026-01-04T16:45:00.000Z', location: 'Front door', description: 'Delivered' },
+      ],
+    },
+  ];
+  cancelActions = new Map<number, string>();
   refunds: { id: number; orderId: number; amount: number; reason: string; actionId?: string }[] = [];
   tickets: Ticket[] = [];
 
   async getCustomer(id: number) { return CUSTOMERS.find((c) => c.id === id) ?? null; }
-  async listOrders(customerId: number) { return ORDERS.filter((o) => o.customerId === customerId); }
-  async getOrder(id: number) { return ORDERS.find((o) => o.id === id) ?? null; }
+  async listOrders(customerId: number) { return this.orders.filter((o) => o.customerId === customerId); }
+  async getOrder(id: number) { return this.orders.find((o) => o.id === id) ?? null; }
   async totalRefunded(orderId: number) {
     return this.refunds.filter((r) => r.orderId === orderId).reduce((s, r) => s + r.amount, 0);
   }
@@ -42,6 +63,17 @@ export class MemoryShop implements ShopRepo {
     const refund = { id: this.refunds.length + 1, orderId: order.id, amount: input.amount, reason: input.reason, actionId: input.actionId };
     this.refunds.push(refund);
     return { refundId: refund.id, refundedTotal: prior + input.amount };
+  }
+  async getShipment(orderId: number) { return this.shipments.find((s) => s.orderId === orderId) ?? null; }
+  async cancelOrder(input: { customerId: number; orderId: number; actionId?: string }) {
+    const order = await this.getOrder(input.orderId);
+    if (!order) throw new GuardrailViolation('NOT_FOUND', 'no such order');
+    assertSameCustomer(input.customerId, order.customerId, `Order #${order.id}`);
+    if (input.actionId && this.cancelActions.get(order.id) === input.actionId) return { orderId: order.id, status: 'cancelled' as const }; // replay
+    assertCancellable({ status: order.status, priorRefunded: await this.totalRefunded(order.id) });
+    order.status = 'cancelled';
+    if (input.actionId) this.cancelActions.set(order.id, input.actionId);
+    return { orderId: order.id, status: 'cancelled' as const };
   }
 }
 

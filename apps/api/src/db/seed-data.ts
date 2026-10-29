@@ -30,6 +30,35 @@ const STATUSES = ['delivered', 'delivered', 'shipped', 'delivered', 'processing'
 export const TOTAL_CUSTOMERS = CUSTOMERS.length;
 export const TOTAL_ORDERS = 30;
 
+const CARRIERS = [
+  { name: 'UPS', prefix: '1Z' },
+  { name: 'FedEx', prefix: 'FX' },
+  { name: 'DHL', prefix: 'JD' },
+  { name: 'USPS', prefix: '94' },
+] as const;
+
+/** Deterministic apart from the clock: a shipment for a shipped or delivered order, with its scan history. */
+async function insertShipment(pool: Pool, n: number, orderStatus: 'shipped' | 'delivered'): Promise<void> {
+  const carrier = CARRIERS[n % CARRIERS.length];
+  const trackingNumber = `${carrier.prefix}${900000000 + n * 7919}`;
+  const daysAgo = (d: number) => new Date(Date.now() - d * 86_400_000).toISOString();
+  const delivered = orderStatus === 'delivered';
+  const status = delivered ? 'delivered' : n % 2 === 0 ? 'in_transit' : 'out_for_delivery';
+  const events = [
+    { at: daysAgo(delivered ? 6 : 4), location: 'Reno, NV', description: 'Label created' },
+    { at: daysAgo(delivered ? 5 : 3), location: 'Reno, NV', description: 'Picked up by carrier' },
+    { at: daysAgo(delivered ? 3 : 1), location: 'Salt Lake City, UT', description: 'In transit' },
+    delivered
+      ? { at: daysAgo(1), location: 'Front door', description: 'Delivered' }
+      : { at: daysAgo(0.25), location: 'Denver, CO', description: status === 'out_for_delivery' ? 'Out for delivery' : 'Arrived at regional facility' },
+  ];
+  const eta = delivered ? daysAgo(1) : new Date(Date.now() + (1 + (n % 3)) * 86_400_000).toISOString();
+  await pool.query(
+    'INSERT INTO shipments (order_id, carrier, tracking_number, status, eta, events) VALUES ($1, $2, $3, $4, $5, $6)',
+    [n, carrier.name, trackingNumber, status, eta, JSON.stringify(events)],
+  );
+}
+
 /**
  * Deterministic seed: order N belongs to customer ((N-1) % 10) + 1, so customer 1 owns orders 1, 11, 21.
  * Order 12 has a prior partial refund, which makes the over-refund guardrail easy to demo.
@@ -55,6 +84,7 @@ export async function seedDatabase(pool: Pool): Promise<void> {
        VALUES ($1, $2, $3, $4, now() - ($5 || ' days')::interval)`,
       [customerId, status, total, JSON.stringify(items), String(60 - n)],
     );
+    if (status === 'shipped' || status === 'delivered') await insertShipment(pool, n, status);
   }
 
   await pool.query(

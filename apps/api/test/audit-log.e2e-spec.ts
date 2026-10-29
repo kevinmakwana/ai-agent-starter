@@ -115,6 +115,16 @@ maybe('approval audit log in the store (real Postgres)', () => {
     expect(view).toMatchObject({ id: action.id, policyRule: 'over_threshold', policyDetail: { threshold: 10, priorRefunded: 0, amount: 18.75 } });
   });
 
+  it('exposes the order status on the approval listing, null when the order is unknown', async () => {
+    const { conv, run } = await park();
+    const unknown = await store.createAction({
+      runId: run.id, conversationId: conv.id, toolName: 'cancel_order', toolArgs: { orderId: 999999, reason: 'x' }, toolCallId: 'call_2', reasoning: 'r',
+    });
+    const views = await store.listApprovals({ conversationId: conv.id });
+    expect(views.find((v) => v.toolArgs && (v.toolArgs as any).orderId === 1)).toMatchObject({ orderStatus: 'delivered' });
+    expect(views.find((v) => v.id === unknown.id)).toMatchObject({ orderStatus: null, orderTotal: null });
+  });
+
   it('removes events with their conversation and is wiped by a re-seed', async () => {
     const { conv } = await park();
     await pool.query('DELETE FROM conversations WHERE id = $1', [conv.id]);
@@ -170,6 +180,20 @@ maybe('approval audit log over HTTP (real Postgres)', () => {
       expect(events.map((e: any) => [e.kind, e.actorType])).toEqual([['approved', 'reviewer'], ['requested', 'policy']]);
       expect(events[0]).toMatchObject({ actionId: pending.id, note: 'ok', actorId: null, toolName: 'issue_refund' });
       expect(events[0].toolArgs).toMatchObject({ orderId: 1, amount: 18.75 });
+    });
+
+    it('parks a cancellation with the policy rule and order status for reviewers, status only for the customer', async () => {
+      const c = await start(1);
+      const sent = await say(c, 'Cancel order #11, I ordered it by mistake');
+      expect(sent.body.run.status).toBe('awaiting_approval');
+
+      const [pending] = (await http().get('/approvals?status=pending').set(reviewer).expect(200)).body;
+      expect(pending).toMatchObject({ toolName: 'cancel_order', toolArgs: { orderId: 11 }, policyRule: 'tool_requires_review', orderStatus: 'processing' });
+
+      const asCustomer = (await http().get(`/conversations/${c.id}`).set(c.token).expect(200)).body;
+      expect(asCustomer.approvals[0]).toMatchObject({ toolName: 'cancel_order', orderStatus: 'processing' });
+      expect(asCustomer.approvals[0]).not.toHaveProperty('policyRule');
+      expect(asCustomer.approvals[0]).not.toHaveProperty('policyDetail');
     });
 
     it('filters by conversation and pages with limit and before', async () => {

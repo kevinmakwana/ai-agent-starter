@@ -1,7 +1,8 @@
 import { GuardrailViolation } from './errors';
-import { assertRefundable, assertSameCustomer, refundable } from './guardrails';
+import { assertCancellable, assertRefundable, assertSameCustomer, refundable } from './guardrails';
 import { TOOLS, type ToolContext } from './tools';
 import { MemoryShop } from '../../test/fakes';
+import type { Order } from './types';
 
 const tool = (name: string) => TOOLS.find((t) => t.name === name)!;
 const code = (fn: () => unknown) => { try { fn(); } catch (e) { return (e as GuardrailViolation).code; } };
@@ -62,5 +63,63 @@ describe('tool-level guardrails (conversation bound to customer 1)', () => {
     const c = ctx();
     await expect(tool('issue_refund').preflight!(c, { orderId: 1, amount: 50.01, reason: 'too much' })).rejects.toMatchObject({ code: 'OVER_REFUND' });
     await expect(tool('issue_refund').execute(c, { orderId: 1, amount: 50.01, reason: 'too much' })).rejects.toMatchObject({ code: 'OVER_REFUND' });
+  });
+
+  const processing = (id = 10): Order => ({ id, customerId: 1, status: 'processing', total: 30, items: [], createdAt: '2026-01-05T00:00:00.000Z' });
+
+  it('track_shipment returns the shipment of an own delivered order', async () => {
+    await expect(tool('track_shipment').execute(ctx(), { orderId: 1 })).resolves.toMatchObject({
+      shipped: true, orderId: 1, carrier: 'FedEx', trackingNumber: 'FX900000001', status: 'delivered',
+    });
+  });
+
+  it("track_shipment refuses another customer's order without touching the shipment table", async () => {
+    const shop = new MemoryShop();
+    const getShipment = jest.spyOn(shop, 'getShipment');
+    await expect(tool('track_shipment').execute({ customerId: 1, shop }, { orderId: 2 })).rejects.toMatchObject({ code: 'CROSS_CUSTOMER' });
+    expect(getShipment).not.toHaveBeenCalled();
+  });
+
+  it('track_shipment says an unshipped order has no shipment', async () => {
+    const shop = new MemoryShop();
+    shop.orders.push(processing());
+    await expect(tool('track_shipment').execute({ customerId: 1, shop }, { orderId: 10 })).resolves.toEqual({
+      shipped: false, orderId: 10, orderStatus: 'processing',
+    });
+  });
+
+  it('cancel_order preflight passes only for an own, processing order with no refunds', async () => {
+    const shop = new MemoryShop();
+    shop.orders.push(processing(), processing(11));
+    shop.refunds.push({ id: 1, orderId: 11, amount: 5, reason: 'partial' });
+    const c: ToolContext = { customerId: 1, shop };
+    const preflight = (orderId: number) => tool('cancel_order').preflight!(c, { orderId, reason: 'changed my mind' });
+
+    await expect(preflight(10)).resolves.toBeDefined();
+    await expect(preflight(1)).rejects.toMatchObject({ code: 'NOT_CANCELLABLE' });
+    await expect(preflight(3)).rejects.toMatchObject({ code: 'ALREADY_CANCELLED' });
+    await expect(preflight(11)).rejects.toMatchObject({ code: 'HAS_REFUNDS' });
+    await expect(preflight(2)).rejects.toMatchObject({ code: 'CROSS_CUSTOMER' });
+  });
+
+  it('cancel_order execute cancels the order', async () => {
+    const shop = new MemoryShop();
+    shop.orders.push(processing());
+    await expect(tool('cancel_order').execute({ customerId: 1, shop }, { orderId: 10, reason: 'changed my mind' })).resolves.toEqual({
+      orderId: 10, status: 'cancelled',
+    });
+    expect((await shop.getOrder(10))?.status).toBe('cancelled');
+  });
+});
+
+describe('assertCancellable', () => {
+  it('allows a processing order with no refunds', () => {
+    expect(code(() => assertCancellable({ status: 'processing', priorRefunded: 0 }))).toBeUndefined();
+  });
+  it('refuses a cancelled order first, then shipped or delivered ones, then refunded ones', () => {
+    expect(code(() => assertCancellable({ status: 'cancelled', priorRefunded: 5 }))).toBe('ALREADY_CANCELLED');
+    expect(code(() => assertCancellable({ status: 'shipped', priorRefunded: 0 }))).toBe('NOT_CANCELLABLE');
+    expect(code(() => assertCancellable({ status: 'delivered', priorRefunded: 5 }))).toBe('NOT_CANCELLABLE');
+    expect(code(() => assertCancellable({ status: 'processing', priorRefunded: 0.01 }))).toBe('HAS_REFUNDS');
   });
 });

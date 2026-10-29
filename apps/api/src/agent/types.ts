@@ -137,6 +137,21 @@ export interface DecisionAudit {
   actorType: 'reviewer' | 'system';
 }
 
+export interface ShipmentEvent {
+  at: string;
+  location: string;
+  description: string;
+}
+
+export interface Shipment {
+  orderId: number;
+  carrier: string;
+  trackingNumber: string;
+  status: 'label_created' | 'in_transit' | 'out_for_delivery' | 'delivered';
+  eta: string | null;
+  events: ShipmentEvent[];
+}
+
 /** Everything the agent reads/writes about the shop. Implemented by Postgres and (in tests) in memory. */
 export interface ShopRepo {
   getCustomer(id: number): Promise<Customer | null>;
@@ -152,6 +167,9 @@ export interface ShopRepo {
     reason: string;
     actionId?: string;
   }): Promise<{ refundId: number; refundedTotal: number }>;
+  getShipment(orderId: number): Promise<Shipment | null>;
+  /** Atomically re-checks that the order can still be cancelled, then cancels it; a replay of the same actionId returns the same result. */
+  cancelOrder(input: { customerId: number; orderId: number; actionId?: string }): Promise<{ orderId: number; status: 'cancelled' }>;
 }
 
 /** Persistence for runs, steps and approvals. */

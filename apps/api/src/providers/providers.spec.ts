@@ -78,4 +78,44 @@ describe('MockProvider', () => {
     expect(a.toolCalls[0].name).toBe('list_orders');
     expect(a.toolCalls[0].args).toEqual({}); // the conversation, not the model, decides whose orders
   });
+
+  describe('first step for ordinary messages (cancel/track rules must not capture them)', () => {
+    const first = async (content: string) => {
+      const c = await new MockProvider().complete([{ role: 'user', content }]);
+      return c.toolCalls[0] ? [c.toolCalls[0].name, c.toolCalls[0].args] : [undefined, c.text];
+    };
+
+    it.each([
+      ['show my recent orders', 'list_orders', {}],
+      ['Show me order #3', 'get_order', { orderId: 3 }],
+      ['Why was order #3 cancelled?', 'get_order', { orderId: 3 }],
+      ['order 3 was canceled, what happened', 'get_order', { orderId: 3 }],
+      ['refund order #1, it arrived damaged', 'get_order', { orderId: 1 }],
+      ['Cancel order #4 and refund me', 'get_order', { orderId: 4 }], // refund keeps priority
+      ['I want to complain about my order', 'create_ticket', undefined],
+      ['Cancel order #4, changed my mind', 'get_order', { orderId: 4 }],
+      ['Cancel my order', 'list_orders', {}],
+      ['track order #4', 'track_shipment', { orderId: 4 }],
+      ['Where is my order #4?', 'track_shipment', { orderId: 4 }],
+      ['has my order shipped? order 4', 'track_shipment', { orderId: 4 }],
+    ])('%s -> %s', async (content, name, args) => {
+      const [gotName, gotArgs] = await first(content);
+      expect(gotName).toBe(name);
+      if (args) expect(gotArgs).toEqual(args);
+    });
+
+    it.each(['hello', 'hi there, I need help', 'my parcel was late, thanks', 'ava.brooks@example.com is my email'])(
+      'greeting-like %j makes no cancel or track call', async (content) => {
+        const [name] = await first(content);
+        expect(['cancel_order', 'track_shipment']).not.toContain(name);
+      },
+    );
+
+    it('mentions cancelling and tracking in the greeting', async () => {
+      const c = await new MockProvider().complete([{ role: 'user', content: 'hello' }]);
+      expect(c.toolCalls).toEqual([]);
+      expect(c.text).toMatch(/cancel/i);
+      expect(c.text).toMatch(/track/i);
+    });
+  });
 });

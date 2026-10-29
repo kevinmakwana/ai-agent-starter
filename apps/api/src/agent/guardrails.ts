@@ -38,5 +38,24 @@ export function assertRefundable({ amount, orderTotal, priorRefunded, status }: 
   }
 }
 
+export interface CancelCheck {
+  status: OrderStatus;
+  priorRefunded: number;
+}
+
+/** Only a processing order with no money refunded can still be cancelled. */
+export function assertCancellable({ status, priorRefunded }: CancelCheck): void {
+  if (status === 'cancelled') throw new GuardrailViolation('ALREADY_CANCELLED', 'This order is already cancelled.');
+  if (status !== 'processing') {
+    throw new GuardrailViolation(
+      'NOT_CANCELLABLE',
+      `This order is ${status} and can no longer be cancelled; a refund or a support ticket is the way to resolve it.`,
+    );
+  }
+  if (toCents(priorRefunded) > 0) {
+    throw new GuardrailViolation('HAS_REFUNDS', 'This order has refunds recorded against it, so it cannot be cancelled.');
+  }
+}
+
 export const refundable = (orderTotal: number, priorRefunded: number) =>
   Math.max(0, (toCents(orderTotal) - toCents(priorRefunded)) / 100);
