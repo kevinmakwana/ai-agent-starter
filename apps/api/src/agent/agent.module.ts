@@ -9,6 +9,7 @@ import { ConversationsController } from '../http/conversations.controller';
 import { DomainErrorFilter } from '../http/domain-error.filter';
 import { EventsController } from '../http/events.controller';
 import { HealthController } from '../http/health.controller';
+import { NotifierLifecycle } from '../notify/notifier.lifecycle';
 import { createProvider } from '../providers';
 import { APP_CONFIG, CHAT_PROVIDER } from '../tokens';
 import { ApprovalExpiry } from './approval-expiry';
@@ -37,6 +38,7 @@ import type { ChatProvider } from './types';
         }),
     },
     ApprovalExpiryScheduler,
+    NotifierLifecycle,
     {
       provide: StreamBus,
       inject: [APP_CONFIG],
