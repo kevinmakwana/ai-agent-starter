@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import type { ApprovalPolicyConfig } from './agent/policy';
+import { loadNotifyConfig, type NotifyConfig } from './notify/notify-config';
 
 /** Loads the single root .env (nearest one above cwd). Existing environment variables win. */
 export function loadRootEnv(startDir = process.cwd()): void {
@@ -108,6 +109,8 @@ export interface AppConfig {
   approvalTtlMinutes: number;
   /** Which risky tool calls skip human review. Defaults to none. */
   approvalPolicy: ApprovalPolicyConfig;
+  /** Where to announce new pending approvals to reviewers. No channels = notifications off. */
+  notify: NotifyConfig;
   /** Extra attempts for retryable provider failures (network, 408, 429, 5xx). */
   llmMaxRetries: number;
   /** Output cap per model call. Unset = Anthropic 4096 / OpenAI the model's own limit. */
@@ -142,6 +145,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     contextMaxTokens: positiveInt(env, 'CONTEXT_MAX_TOKENS', 8000),
     approvalTtlMinutes: nonNegativeInt(env, 'APPROVAL_TTL_MINUTES', 1440),
     approvalPolicy: { refundAutoApproveUnder: moneyAmount(env, 'REFUND_AUTO_APPROVE_UNDER', 0) },
+    notify: loadNotifyConfig(env),
     llmMaxRetries: nonNegativeInt(env, 'LLM_MAX_RETRIES', 2),
     llmMaxTokens: env.LLM_MAX_TOKENS ? positiveInt(env, 'LLM_MAX_TOKENS', 0) : undefined,
     provider,
