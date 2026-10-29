@@ -124,3 +124,14 @@ The `note` handed to every channel:
 
 Notifying on decisions or expiry, reminders and escalation, per-reviewer routing and preferences (4.5), a durable outbox
 with a retry worker, HTML email, digests.
+
+## Changes made during implementation
+
+The built behaviour differs from the text above in these ways (the README follows the code):
+
+- Claimed rows that were not yet attempted when a graceful shutdown begins are released (`PgAgentStore.releaseClaims`), so the next process announces them. A hard kill still loses the claimed batch.
+- The claim batch is 5 (not 20) to keep that window small; email gets a 20 s per-attempt allowance (other channels 5 s) through `Channel.timeoutMs`.
+- A remote `smtp://` host requires STARTTLS (`requireTLS`); the SMTP URL may not carry a query string or fragment; webhook, Slack and console URLs may not carry credentials; values are trimmed.
+- `notified_at` is per approval, not per channel, and is set at claim time. All replicas must share one notification configuration.
+- `notifiedAt` is hidden from non-reviewer callers (it is visible to reviewers, and to everyone in demo mode).
+- The Slack line uses an ASCII hyphen, the claim does not join the order total, and the email transport is built when channels are created (no connection until the first send).
