@@ -51,15 +51,9 @@
 - [ ] 5.7 Remove `any` in tools, provider parsing and web types.
 - [ ] 5.8 Eval suite (recorded traces, prompt-injection cases).
 
-## Portfolio plan (execution order)
-Ten steps to turn the starter into a portfolio-ready project. Existing items are referenced by number.
-- [ ] P.1 Land the finished Phase 4 work on `main` (4.1 SSE, 4.6 tools, 4.4 notifications), in order, one PR each.
-- [ ] P.2 One-command run: Dockerfiles for API and web and a full-stack compose (5.4).
-- [ ] P.3 Quality gates in CI: ESLint, Prettier, `.editorconfig` (5.1) and web tests (5.2).
+## Portfolio plan
+Work that only matters for presenting the project; everything else is tracked in the phases above.
+- [x] P.1 Land the finished Phase 4 work on `main` (4.1 SSE, 4.6 tools, 4.4 notifications), in order, one PR each.
 - [ ] P.4 Portfolio README: architecture diagram, screenshots/GIF, "what this demonstrates", plus the manual browser check of the UI.
-- [ ] P.5 Per-reviewer accounts and four-eyes (4.5, part 1), then customer login (4.5, part 2).
-- [ ] P.6 Eval suite with recorded traces and prompt-injection cases (5.8).
-- [ ] P.7 Structured logging with request IDs; liveness/readiness split for `/health` (5.6).
-- [ ] P.8 Real migrations instead of DDL on boot (5.5).
-- [ ] P.9 Coverage reporting in CI (5.3) and remove `any` (5.7).
-- [ ] P.10 Verify the Anthropic adapter against a live key (3.6; needs `ANTHROPIC_API_KEY`).
+
+Suggested order for the open phase items: 5.4 (Docker), 5.1 + 5.2 (lint and web tests), P.4, 4.5 (reviewer accounts and four-eyes, then customer login), 5.8 (evals), 5.6, 5.5, 5.3 + 5.7, 3.6 (needs a live `ANTHROPIC_API_KEY`).
