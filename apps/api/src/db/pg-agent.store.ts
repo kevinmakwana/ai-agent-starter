@@ -39,6 +39,8 @@ export interface ApprovalView extends Action {
   policyDetail: Record<string, unknown> | null;
   /** Active reviewers who have approved so far, in order (reviewer-only; customers never see this). */
   approvedBy: string[];
+  /** Their ids, parallel to `approvedBy`: names are not unique, so "have I approved this" must compare ids. */
+  approvedByIds: string[];
   approvalsGiven: number;
 }
 
@@ -385,7 +387,9 @@ export class PgAgentStore implements AgentStore {
          (SELECT e.rule FROM approval_events e WHERE e.action_id = a.id AND e.kind = 'requested' ORDER BY e.id LIMIT 1) AS policy_rule,
          (SELECT e.detail FROM approval_events e WHERE e.action_id = a.id AND e.kind = 'requested' ORDER BY e.id LIMIT 1) AS policy_detail,
          COALESCE((SELECT array_agg(r.name ORDER BY aa.created_at, r.id) FROM action_approvals aa JOIN reviewers r ON r.id = aa.reviewer_id
-                    WHERE aa.action_id = a.id AND r.active), '{}') AS approved_by
+                    WHERE aa.action_id = a.id AND r.active), '{}') AS approved_by,
+         COALESCE((SELECT array_agg(r.id ORDER BY aa.created_at, r.id) FROM action_approvals aa JOIN reviewers r ON r.id = aa.reviewer_id
+                    WHERE aa.action_id = a.id AND r.active), '{}') AS approved_by_ids
        FROM actions a
        JOIN conversations c ON c.id = a.conversation_id
        JOIN customers cu ON cu.id = c.customer_id

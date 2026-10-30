@@ -30,7 +30,7 @@ export function AuditLog({ events }: { events: ApprovalEvent[] }) {
               {e.toolArgs.amount != null && <span className="audit-amount"> {usd(e.toolArgs.amount)}</span>}
             </div>
             <div className="muted">
-              {WHO[e.actorType]}{rule && ` · ${rule}`}{e.note && ` · “${e.note}”`}
+              {e.actorName ?? WHO[e.actorType]}{rule && ` · ${rule}`}{e.note && ` · “${e.note}”`}
             </div>
           </li>
         );

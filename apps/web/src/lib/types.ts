@@ -36,6 +36,17 @@ export interface Approval {
   /** Why a human was needed (from the audit log); null for approvals created before the log existed. Absent in customer views. */
   policyRule?: string | null;
   policyDetail?: PolicyDetail | null;
+  /** Four-eyes progress. Absent in customer views and on approvals from before accounts existed. */
+  approvalsRequired?: number;
+  approvalsGiven?: number;
+  /** Active reviewers who approved so far, in order; `approvedByIds` is the same list as ids (names are not unique). */
+  approvedBy?: string[];
+  approvedByIds?: string[];
+}
+
+/** A reviewer account as the API shows it (never any credential). */
+export interface Reviewer {
+  id: string; email: string; name: string; role: 'admin' | 'reviewer'; active: boolean; createdAt: string; lastLoginAt: string | null;
 }
 
 export interface ConversationDetail {
@@ -53,6 +64,8 @@ export interface ApprovalEvent {
   conversationId: string;
   actorType: 'reviewer' | 'system' | 'policy';
   actorId: string | null;
+  /** The reviewer's name when a signed-in reviewer did it (kept after they are deactivated); null otherwise. */
+  actorName?: string | null;
   toolName: string;
   toolArgs: { orderId?: number; amount?: number; reason?: string };
   rule: string | null;

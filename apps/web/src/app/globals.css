@@ -153,3 +153,21 @@ blockquote em { display: block; color: var(--muted); margin-top: 4px; }
 .login-card input { padding: 9px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); }
 .new-chat input { flex: 1; min-width: 0; padding: 6px 8px; border-radius: 9px; border: 1px solid var(--line); background: var(--panel); }
 @media (max-width: 1100px) { .app.customer { grid-template-areas: 'top' 'list' 'chat'; grid-template-columns: 1fr; } }
+
+/* reviewer accounts and four-eyes */
+.account { display: inline-flex; align-items: center; gap: 10px; font-size: 13px; }
+.link-btn { background: none; border: 0; padding: 0; cursor: pointer; color: var(--accent); font: inherit; }
+.link-btn:hover { text-decoration: underline; }
+.chip.progress { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+.chip.first_approval { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+.two-eyes { flex-basis: 100%; margin: 4px 0 0; font-size: 12px; }
+.notice.ok { background: var(--accent-soft, #e6f4ea); color: var(--accent); }
+.modal-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, .35); display: grid; place-items: center; padding: 16px; z-index: 10; }
+.modal { width: min(380px, 100%); padding: 20px; gap: 12px; }
+.modal input, .add-reviewer input, .add-reviewer select, .reviewers select, .row-actions input { padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); }
+.row-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.reviewers { padding: 12px; display: flex; flex-direction: column; gap: 14px; }
+.reviewer-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.reviewer-list li { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.reviewer-list li.inactive { opacity: .65; }
+.add-reviewer { display: flex; flex-direction: column; gap: 8px; }

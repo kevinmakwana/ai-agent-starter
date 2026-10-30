@@ -11,10 +11,10 @@ export const forCaller = <R extends Run>(run: R, reviewer: boolean): R =>
  * approvals, by whom) are reviewer-only: customers never see them.
  */
 export const approvalForCaller = <
-  A extends { policyRule?: unknown; policyDetail?: unknown; notifiedAt?: unknown; approvalsRequired?: unknown; approvalsGiven?: unknown; approvedBy?: unknown },
+  A extends { policyRule?: unknown; policyDetail?: unknown; notifiedAt?: unknown; approvalsRequired?: unknown; approvalsGiven?: unknown; approvedBy?: unknown; approvedByIds?: unknown },
 >(a: A, reviewer: boolean): A => {
   if (reviewer) return a;
-  const { policyRule: _rule, policyDetail: _detail, notifiedAt: _notified, approvalsRequired: _req, approvalsGiven: _given, approvedBy: _by, ...rest } = a;
+  const { policyRule: _rule, policyDetail: _detail, notifiedAt: _notified, approvalsRequired: _req, approvalsGiven: _given, approvedBy: _by, approvedByIds: _byIds, ...rest } = a;
   return rest as A;
 };
 

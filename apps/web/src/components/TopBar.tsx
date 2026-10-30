@@ -1,7 +1,9 @@
 import Link from 'next/link';
 import type { StreamStatus } from '@/lib/stream';
 
-export function TopBar({ provider, mode, stream }: { provider: string; mode: 'customer' | 'reviewer'; stream?: StreamStatus }) {
+export interface TopBarAccount { name: string; onLogout: () => void; onChangePassword: () => void }
+
+export function TopBar({ provider, mode, stream, account }: { provider: string; mode: 'customer' | 'reviewer'; stream?: StreamStatus; account?: TopBarAccount | null }) {
   return (
     <header className="topbar">
       <div className="brand">
@@ -14,6 +16,13 @@ export function TopBar({ provider, mode, stream }: { provider: string; mode: 'cu
           </span>
         )}
         <span className="chip provider">LLM: {provider}</span>
+        {account && (
+          <span className="account">
+            <span className="muted">{account.name}</span>
+            <button className="link-btn" onClick={account.onChangePassword}>Change password</button>
+            <button className="link-btn" onClick={account.onLogout}>Log out</button>
+          </span>
+        )}
         <Link className="link" href={mode === 'customer' ? '/reviewer' : '/'}>
           {mode === 'customer' ? 'Reviewer console →' : '← Customer chat'}
         </Link>

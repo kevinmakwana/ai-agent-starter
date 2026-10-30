@@ -21,7 +21,7 @@ const CSRF = { 'X-Requested-By': 'reviewer-console' };
 const REFUND = 'Order #1 arrived damaged, please refund it'; // the mock asks for $50
 const CANCEL = 'Cancel order #11, I ordered it by mistake';
 const ENV_KEYS = ['REVIEWER_API_KEY', 'FOUR_EYES_REFUND_OVER', 'FOUR_EYES_CANCELLATIONS', 'REFUND_AUTO_APPROVE_UNDER'];
-const UNSEEN = ['approvalsRequired', 'approvalsGiven', 'approvedBy'];
+const UNSEEN = ['approvalsRequired', 'approvalsGiven', 'approvedBy', 'approvedByIds'];
 
 maybe('four-eyes approvals over HTTP (e2e, real Postgres)', () => {
   const savedEnv = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
@@ -92,7 +92,7 @@ maybe('four-eyes approvals over HTTP (e2e, real Postgres)', () => {
       expect(await refunds()).toBe(0);
 
       const [now] = await view(alice.cookie);
-      expect(now).toMatchObject({ status: 'pending_approval', approvalsRequired: 2, approvalsGiven: 1, approvedBy: ['alice'] });
+      expect(now).toMatchObject({ status: 'pending_approval', approvalsRequired: 2, approvalsGiven: 1, approvedBy: ['alice'], approvedByIds: [alice.id] });
       const log = await events(alice.cookie);
       expect(log.map((e: { kind: string }) => e.kind)).toEqual(['requested', 'first_approval']);
       expect(log[0].detail).toMatchObject({ approvalsRequired: 2 });
@@ -121,7 +121,7 @@ maybe('four-eyes approvals over HTTP (e2e, real Postgres)', () => {
       expect((await pool.query('SELECT action_id FROM refunds WHERE order_id = 1')).rows[0].action_id).toBe(approval.id);
 
       const [decided] = await view(alice.cookie, 'approved');
-      expect(decided).toMatchObject({ approvalsGiven: 2, approvedBy: ['alice', 'bob'] });
+      expect(decided).toMatchObject({ approvalsGiven: 2, approvedBy: ['alice', 'bob'], approvedByIds: [alice.id, bob.id] });
       const log = await events(alice.cookie);
       expect(log.map((e: { kind: string; actorName: string | null }) => [e.kind, e.actorName])).toEqual([['requested', null], ['first_approval', 'alice'], ['approved', 'bob']]);
       await decide(bob.cookie, approval.id).expect(409); // already decided

@@ -1,4 +1,4 @@
-import type { Approval, ApprovalEvent, ConversationDetail, ConversationSummary, Customer } from './types';
+import type { Approval, ApprovalEvent, ConversationDetail, ConversationSummary, Customer, Reviewer } from './types';
 
 /** `token` = conversation access token (customers); `key` = reviewer API key (console). */
 export interface Auth { token?: string; key?: string }
@@ -17,6 +17,9 @@ export function authHeaders(auth: Auth): Record<string, string> {
 async function call<T>(path: string, init: RequestInit = {}, auth: Auth = {}): Promise<T> {
   const headers = authHeaders(auth);
   if (init.body) headers['content-type'] = 'application/json';
+  // The session cookie rides along on every same-origin request, so any call that changes something proves it came from this
+  // page. Sent whoever the caller is: a signed-in reviewer may also use the customer chat in the same browser.
+  if (init.method && init.method !== 'GET') headers['x-requested-by'] = 'reviewer-console';
   const res = await fetch(`/api${path}`, { ...init, headers, cache: 'no-store' });
   const body = await res.json().catch(() => null);
   if (!res.ok) {
@@ -27,9 +30,10 @@ async function call<T>(path: string, init: RequestInit = {}, auth: Auth = {}): P
 }
 
 const post = (body: unknown): RequestInit => ({ method: 'POST', body: JSON.stringify(body) });
+const patch = (body: unknown): RequestInit => ({ method: 'PATCH', body: JSON.stringify(body) });
 
 export const api = {
-  health: () => call<{ status: string; provider: string; reviewerAuth: boolean }>('/health'),
+  health: () => call<{ status: string; provider: string; reviewerAuth: boolean; reviewerAccounts: boolean }>('/health'),
   // customer
   startConversation: (who: { customerId: number } | { email: string }) =>
     call<ConversationSummary & { accessToken: string }>('/conversations', post(who)),
@@ -42,4 +46,13 @@ export const api = {
   decide: (id: string, decision: 'approve' | 'reject', note: string | undefined, auth: Auth) =>
     call<unknown>(`/approvals/${id}`, post({ decision, note: note || undefined }), auth),
   approvalEvents: (auth: Auth) => call<ApprovalEvent[]>('/approvals/events?limit=100', {}, auth),
+  // reviewer accounts (cookie session: no credential travels in JS)
+  login: (email: string, password: string) => call<{ reviewer: Reviewer }>('/auth/login', post({ email, password })),
+  logout: () => call<null>('/auth/logout', { method: 'POST' }),
+  me: () => call<{ reviewer: Reviewer }>('/auth/me'),
+  changePassword: (current: string, next: string) => call<null>('/auth/password', post({ current, next })),
+  reviewers: () => call<Reviewer[]>('/reviewers'),
+  createReviewer: (r: { email: string; name: string; role: 'admin' | 'reviewer'; password: string }) => call<Reviewer>('/reviewers', post(r)),
+  updateReviewer: (id: string, patchBody: { name?: string; role?: 'admin' | 'reviewer'; active?: boolean; password?: string }) =>
+    call<Reviewer>(`/reviewers/${id}`, patch(patchBody)),
 };
