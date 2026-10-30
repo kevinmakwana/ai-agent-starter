@@ -52,7 +52,8 @@ export interface ReviewerStore {
   listReviewers(): Promise<Reviewer[]>;
   /**
    * Changes the given fields. Deactivating, demoting or setting a password also deletes the reviewer's sessions
-   * (except `keepSession`, the caller's own); null when the reviewer does not exist.
+   * (except `keepSession`, the caller's own); null when the reviewer does not exist. Throws ConflictError `LAST_ADMIN`
+   * rather than leave the system without an active admin.
    */
   updateReviewer(id: string, patch: ReviewerPatch, opts?: { keepSession?: string }): Promise<Reviewer | null>;
   countActiveAdmins(): Promise<number>;

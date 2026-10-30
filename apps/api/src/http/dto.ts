@@ -1,5 +1,5 @@
 import { Transform, Type } from 'class-transformer';
-import { IsEmail, IsIn, IsInt, IsNotEmpty, IsOptional, IsString, IsUUID, Length, Matches, Max, MaxLength, Min, ValidateIf } from 'class-validator';
+import { IsBoolean, IsEmail, IsIn, IsInt, IsNotEmpty, IsOptional, IsString, IsUUID, Length, Matches, Max, MaxLength, Min, ValidateIf } from 'class-validator';
 
 /** Postgres text and jsonb cannot hold NUL; refuse it at the edge instead of failing deep inside a run. */
 const NO_NUL = /^[^\u0000]*$/;
@@ -48,4 +48,54 @@ export class ListApprovalEventsQuery {
   /** Event id to page from: returns events older than it. */
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(Number.MAX_SAFE_INTEGER)
   before?: number;
+}
+
+/** Passwords are only length-checked here (the hashing code owns the minimum) and never appear in a validation message. */
+const passwordField = () => (target: object, key: string) => {
+  IsString({ message: `${key} must be a string` })(target, key);
+  MaxLength(200, { message: `${key} must be at most 200 characters` })(target, key);
+};
+
+export class LoginDto {
+  @trim() @IsEmail() @MaxLength(254)
+  email!: string;
+
+  @passwordField()
+  password!: string;
+}
+
+export class ChangePasswordDto {
+  @passwordField()
+  current!: string;
+
+  @passwordField()
+  next!: string;
+}
+
+export class CreateReviewerDto {
+  @trim() @IsEmail() @MaxLength(254)
+  email!: string;
+
+  @trim() @IsString() @Length(1, 100) @noNul()
+  name!: string;
+
+  @IsIn(['admin', 'reviewer'])
+  role!: 'admin' | 'reviewer';
+
+  @passwordField()
+  password!: string;
+}
+
+export class UpdateReviewerDto {
+  @IsOptional() @trim() @IsString() @Length(1, 100) @noNul()
+  name?: string;
+
+  @IsOptional() @IsIn(['admin', 'reviewer'])
+  role?: 'admin' | 'reviewer';
+
+  @IsOptional() @IsBoolean()
+  active?: boolean;
+
+  @IsOptional() @passwordField()
+  password?: string;
 }

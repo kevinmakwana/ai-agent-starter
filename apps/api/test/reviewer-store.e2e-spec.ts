@@ -63,6 +63,28 @@ maybe('reviewer store (e2e, real Postgres)', () => {
       expect(await store.countActiveAdmins()).toBe(1);
     });
 
+    it('refuses to deactivate or demote the last active admin, and counts only active ones', async () => {
+      const a = await newReviewer('a@example.com', 'admin');
+      await expect(store.updateReviewer(a.id, { active: false })).rejects.toMatchObject({ code: 'LAST_ADMIN' });
+      await expect(store.updateReviewer(a.id, { role: 'reviewer' })).rejects.toMatchObject({ code: 'LAST_ADMIN' });
+      expect(await store.updateReviewer(a.id, { name: 'Renamed' })).toMatchObject({ role: 'admin', active: true });
+      const b = await newReviewer('b@example.com', 'admin');
+      await store.updateReviewer(b.id, { active: false }); // fine: a stays
+      await expect(store.updateReviewer(a.id, { role: 'reviewer' })).rejects.toMatchObject({ code: 'LAST_ADMIN' }); // b is inactive
+      await store.updateReviewer(b.id, { active: true });
+      await expect(store.updateReviewer(a.id, { role: 'reviewer' })).resolves.toMatchObject({ role: 'reviewer' });
+      // an inactive or non-admin reviewer can be changed freely
+      await expect(store.updateReviewer(a.id, { active: false })).resolves.toMatchObject({ active: false });
+    });
+
+    it('two admins deactivating each other at the same instant: one wins, one admin is left', async () => {
+      const a = await newReviewer('a@example.com', 'admin');
+      const b = await newReviewer('b@example.com', 'admin');
+      const results = await Promise.allSettled([store.updateReviewer(a.id, { active: false }), store.updateReviewer(b.id, { active: false })]);
+      expect(results.map((r) => r.status).sort()).toEqual(['fulfilled', 'rejected']);
+      expect(await store.countActiveAdmins()).toBe(1);
+    });
+
     it('updates only the given fields and returns null for an unknown id', async () => {
       const r = await newReviewer();
       expect(await store.updateReviewer(r.id, { name: 'Renamed' })).toMatchObject({ name: 'Renamed', role: 'reviewer', active: true });
@@ -111,6 +133,7 @@ maybe('reviewer store (e2e, real Postgres)', () => {
     });
 
     it('a password change or demotion deletes other sessions and keeps the named one; promotion deletes none', async () => {
+      await newReviewer('second@example.com', 'admin'); // a demotion needs another admin to remain
       const r = await newReviewer('a@example.com', 'admin');
       await store.createSession(r.id, 'mine', 12);
       await store.createSession(r.id, 'other', 12);

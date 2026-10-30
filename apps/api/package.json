@@ -8,6 +8,7 @@
     "build": "nest build",
     "start": "node dist/main",
     "seed": "tsx src/db/seed.ts",
+    "reviewer:add": "tsx src/cli/reviewer-add.ts",
     "smoke:llm": "tsx src/providers/smoke.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "jest",

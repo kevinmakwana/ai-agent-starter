@@ -60,10 +60,18 @@ export class PgReviewerStore implements ReviewerStore {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
-      const { rows: before } = await client.query('SELECT role FROM reviewers WHERE id = $1 FOR UPDATE', [id]);
+      // Losing an admin is checked against a count, which row locks on two different admins cannot serialize
+      // (each of two admins demoting the other would see "one other admin left"), so take one lock for the check.
+      const losesAdmin = patch.active === false || patch.role === 'reviewer';
+      if (losesAdmin) await client.query(`SELECT pg_advisory_xact_lock(hashtext('reviewers:last-admin'))`);
+      const { rows: before } = await client.query('SELECT role, active FROM reviewers WHERE id = $1 FOR UPDATE', [id]);
       if (!before[0]) {
         await client.query('ROLLBACK');
         return null;
+      }
+      if (losesAdmin && before[0].role === 'admin' && before[0].active) {
+        const { rows: n } = await client.query(`SELECT count(*)::int AS n FROM reviewers WHERE role = 'admin' AND active AND id <> $1`, [id]);
+        if (n[0].n === 0) throw new ConflictError('The last active administrator cannot be deactivated or demoted', 'LAST_ADMIN');
       }
       const { rows } = await client.query(
         `UPDATE reviewers SET name = COALESCE($2, name), role = COALESCE($3, role), active = COALESCE($4, active),

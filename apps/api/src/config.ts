@@ -61,6 +61,9 @@ function moneyAmount(env: NodeJS.ProcessEnv, name: string, fallback: number): nu
   return n;
 }
 
+/** POST /auth/login per client per minute; read on its own like the limits above. */
+export const loadLoginLimit = (env: NodeJS.ProcessEnv = process.env): number => positiveInt(env, 'RATE_LIMIT_LOGIN_PER_MINUTE', 10);
+
 /** Read on their own because route decorators resolve them per request. */
 export const loadRateLimits = (env: NodeJS.ProcessEnv = process.env): RateLimits => ({
   perMinute: positiveInt(env, 'RATE_LIMIT_PER_MINUTE', 600),
@@ -167,7 +170,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     auth: {
       sessionTtlHours: positiveInt(env, 'SESSION_TTL_HOURS', 12),
       cookieSecure: booleanFlag(env, 'COOKIE_SECURE', env.NODE_ENV === 'production'),
-      loginPerMinute: positiveInt(env, 'RATE_LIMIT_LOGIN_PER_MINUTE', 10),
+      loginPerMinute: loadLoginLimit(env),
     },
     approvalPolicy: {
       refundAutoApproveUnder: moneyAmount(env, 'REFUND_AUTO_APPROVE_UNDER', 0),
