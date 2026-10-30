@@ -105,7 +105,7 @@ export type NewAction = Pick<Action, 'runId' | 'conversationId' | 'toolName' | '
   policy?: { rule: string; detail: Record<string, unknown> };
 };
 
-export type ApprovalEventKind = 'requested' | 'auto_approved' | 'approved' | 'rejected' | 'expired';
+export type ApprovalEventKind = 'requested' | 'auto_approved' | 'first_approval' | 'approved' | 'rejected' | 'expired';
 export type ApprovalActorType = 'reviewer' | 'system' | 'policy';
 
 /** One immutable line of the approval audit log. */

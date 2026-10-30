@@ -47,7 +47,7 @@ export interface ConversationDetail {
 
 export interface ApprovalEvent {
   id: number;
-  kind: 'requested' | 'auto_approved' | 'approved' | 'rejected' | 'expired';
+  kind: 'requested' | 'auto_approved' | 'first_approval' | 'approved' | 'rejected' | 'expired';
   actionId: string | null;
   runId: string;
   conversationId: string;

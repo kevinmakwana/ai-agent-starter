@@ -3,7 +3,7 @@ import type { ApprovalEvent } from '@/lib/types';
 
 const usd = (n: number | undefined) => (n == null ? '' : `$${n.toFixed(2)}`);
 const KIND: Record<ApprovalEvent['kind'], string> = {
-  requested: 'Review requested', auto_approved: 'Auto-approved', approved: 'Approved', rejected: 'Rejected', expired: 'Expired',
+  requested: 'Review requested', auto_approved: 'Auto-approved', first_approval: 'First approval', approved: 'Approved', rejected: 'Rejected', expired: 'Expired',
 };
 const WHO: Record<ApprovalEvent['actorType'], string> = { reviewer: 'Reviewer', system: 'System', policy: 'Policy' };
 

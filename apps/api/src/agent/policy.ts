@@ -1,6 +1,13 @@
 export interface ApprovalPolicyConfig {
   /** Refunds whose order total (this one plus earlier refunds) stays under this many dollars skip review. 0 = always review. */
   refundAutoApproveUnder: number;
+  /** Actions that need two different reviewers. Absent = nothing does. */
+  fourEyes?: {
+    /** Refunds of strictly more than this many dollars need two approvals. 0 = off. */
+    refundOver: number;
+    /** Every cancellation needs two approvals. */
+    cancellations: boolean;
+  };
 }
 
 /** What `preflight` learned about the world, for the policy to weigh. */

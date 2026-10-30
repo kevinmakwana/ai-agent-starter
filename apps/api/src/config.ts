@@ -86,6 +86,24 @@ function parseTrustProxy(raw = ''): number | false {
   return n;
 }
 
+/** Strictly `true` or `false`; anything else is a startup error rather than a guess. */
+function booleanFlag(env: NodeJS.ProcessEnv, name: string, fallback: boolean): boolean {
+  const raw = env[name];
+  if (raw === undefined || raw === '') return fallback;
+  if (raw === 'true') return true;
+  if (raw === 'false') return false;
+  throw new Error(`${name} must be true or false (got "${raw}")`);
+}
+
+export interface AuthConfig {
+  /** Absolute lifetime of a reviewer session, in hours. */
+  sessionTtlHours: number;
+  /** Adds `Secure` to the session cookie. Defaults to true when NODE_ENV=production. */
+  cookieSecure: boolean;
+  /** POST /auth/login per client per minute. */
+  loginPerMinute: number;
+}
+
 export type ProviderName = 'mock' | 'openai' | 'anthropic';
 
 export interface AppConfig {
@@ -107,7 +125,9 @@ export interface AppConfig {
   contextMaxTokens: number;
   /** Pending approvals older than this many minutes are auto-rejected. 0 = never expire. */
   approvalTtlMinutes: number;
-  /** Which risky tool calls skip human review. Defaults to none. */
+  /** Reviewer sessions and the login rate limit. */
+  auth: AuthConfig;
+  /** Which risky tool calls skip human review (and which need two reviewers). Defaults to none. */
   approvalPolicy: ApprovalPolicyConfig;
   /** Where to announce new pending approvals to reviewers. No channels = notifications off. */
   notify: NotifyConfig;
@@ -144,7 +164,18 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     conversationTokenBudget: positiveInt(env, 'CONVERSATION_TOKEN_BUDGET', 200_000),
     contextMaxTokens: positiveInt(env, 'CONTEXT_MAX_TOKENS', 8000),
     approvalTtlMinutes: nonNegativeInt(env, 'APPROVAL_TTL_MINUTES', 1440),
-    approvalPolicy: { refundAutoApproveUnder: moneyAmount(env, 'REFUND_AUTO_APPROVE_UNDER', 0) },
+    auth: {
+      sessionTtlHours: positiveInt(env, 'SESSION_TTL_HOURS', 12),
+      cookieSecure: booleanFlag(env, 'COOKIE_SECURE', env.NODE_ENV === 'production'),
+      loginPerMinute: positiveInt(env, 'RATE_LIMIT_LOGIN_PER_MINUTE', 10),
+    },
+    approvalPolicy: {
+      refundAutoApproveUnder: moneyAmount(env, 'REFUND_AUTO_APPROVE_UNDER', 0),
+      fourEyes: {
+        refundOver: moneyAmount(env, 'FOUR_EYES_REFUND_OVER', 0),
+        cancellations: booleanFlag(env, 'FOUR_EYES_CANCELLATIONS', false),
+      },
+    },
     notify: loadNotifyConfig(env),
     llmMaxRetries: nonNegativeInt(env, 'LLM_MAX_RETRIES', 2),
     llmMaxTokens: env.LLM_MAX_TOKENS ? positiveInt(env, 'LLM_MAX_TOKENS', 0) : undefined,

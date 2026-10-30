@@ -122,6 +122,42 @@ CREATE TABLE IF NOT EXISTS approval_events (
 CREATE INDEX IF NOT EXISTS approval_events_conversation_idx ON approval_events (conversation_id, id);
 CREATE INDEX IF NOT EXISTS approval_events_action_idx ON approval_events (action_id);
 
+-- Reviewer accounts (TODO 4.5a). Sessions store only a SHA-256 of the cookie token.
+CREATE TABLE IF NOT EXISTS reviewers (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  email text NOT NULL UNIQUE CHECK (email = lower(email)),
+  name text NOT NULL,
+  password_hash text NOT NULL,
+  role text NOT NULL CHECK (role IN ('admin', 'reviewer')),
+  active boolean NOT NULL DEFAULT true,
+  failed_attempts int NOT NULL DEFAULT 0,
+  locked_until timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  last_login_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS reviewer_sessions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  reviewer_id uuid NOT NULL REFERENCES reviewers(id) ON DELETE CASCADE,
+  token_hash text NOT NULL UNIQUE,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  last_seen_at timestamptz NOT NULL DEFAULT now(),
+  expires_at timestamptz NOT NULL
+);
+CREATE INDEX IF NOT EXISTS reviewer_sessions_reviewer_idx ON reviewer_sessions (reviewer_id);
+
+-- Four-eyes: how many distinct reviewers must approve, fixed when the action is parked.
+ALTER TABLE actions ADD COLUMN IF NOT EXISTS approvals_required int NOT NULL DEFAULT 1 CHECK (approvals_required IN (1, 2));
+CREATE TABLE IF NOT EXISTS action_approvals (
+  action_id uuid NOT NULL REFERENCES actions(id) ON DELETE CASCADE,
+  reviewer_id uuid NOT NULL REFERENCES reviewers(id),
+  note text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (action_id, reviewer_id)
+);
+ALTER TABLE approval_events DROP CONSTRAINT IF EXISTS approval_events_kind_check;
+ALTER TABLE approval_events ADD CONSTRAINT approval_events_kind_check
+  CHECK (kind IN ('requested', 'auto_approved', 'first_approval', 'approved', 'rejected', 'expired'));
+
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS cancel_action_id uuid;
 CREATE UNIQUE INDEX IF NOT EXISTS orders_cancel_action_uniq ON orders (cancel_action_id) WHERE cancel_action_id IS NOT NULL;
 
@@ -136,4 +172,4 @@ CREATE TABLE IF NOT EXISTS shipments (
 `;
 
 export const RESET_SQL =
-  'TRUNCATE customers, orders, tickets, refunds, shipments, conversations, runs, steps, actions, approval_events RESTART IDENTITY CASCADE';
+  'TRUNCATE customers, orders, tickets, refunds, shipments, conversations, runs, steps, actions, approval_events, reviewers, reviewer_sessions, action_approvals RESTART IDENTITY CASCADE';
