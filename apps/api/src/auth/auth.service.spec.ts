@@ -1,4 +1,4 @@
-import { UnauthorizedException } from '@nestjs/common';
+import { Logger, UnauthorizedException } from '@nestjs/common';
 import { MemoryReviewerStore } from '../../test/fake-reviewers';
 import { loadConfig } from '../config';
 import { AuthService, hashSessionToken } from './auth.service';
@@ -160,5 +160,37 @@ describe('logout and change password', () => {
     expect(await auth.resolvePrincipal(cookie(two.token))).toEqual({ kind: 'none' });
     await expect(auth.login('a@example.com', PW)).rejects.toThrow();
     await expect(auth.login('a@example.com', 'a brand new password')).resolves.toBeDefined();
+  });
+});
+
+describe('startup warning for four-eyes without accounts', () => {
+  const warnings = () => jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+
+  it('warns when four-eyes is on but no reviewer exists yet (those approvals cannot be given by key or demo callers)', async () => {
+    const warn = warnings();
+    const { auth } = await setup({ FOUR_EYES_REFUND_OVER: '100' });
+    await auth.onApplicationBootstrap();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0][0])).toMatch(/four-eyes.*reviewer:add/i);
+    const cancels = await setup({ FOUR_EYES_CANCELLATIONS: 'true' });
+    await cancels.auth.onApplicationBootstrap();
+    expect(warn).toHaveBeenCalledTimes(2);
+  });
+
+  it('stays quiet when four-eyes is off, or reviewer accounts already exist', async () => {
+    const warn = warnings();
+    const off = await setup();
+    await off.auth.onApplicationBootstrap();
+    const on = await setup({ FOUR_EYES_REFUND_OVER: '100' });
+    await on.add();
+    await on.auth.onApplicationBootstrap();
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('never fails startup when the database cannot answer', async () => {
+    warnings();
+    const { auth, store } = await setup({ FOUR_EYES_REFUND_OVER: '100' });
+    jest.spyOn(store, 'hasAnyReviewer').mockRejectedValue(new Error('db down'));
+    await expect(auth.onApplicationBootstrap()).resolves.toBeUndefined();
   });
 });

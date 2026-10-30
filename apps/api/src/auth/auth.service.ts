@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, type OnApplicationBootstrap, UnauthorizedException } from '@nestjs/common';
 import { createHash, randomBytes } from 'node:crypto';
 import type { Request } from 'express';
 import type { AppConfig } from '../config';
@@ -16,12 +16,24 @@ export const hashSessionToken = (token: string) => createHash('sha256').update(t
 const invalidLogin = () => new UnauthorizedException('Invalid email or password');
 
 @Injectable()
-export class AuthService {
+export class AuthService implements OnApplicationBootstrap {
   private readonly log = new Logger('Auth');
   private warnedDemo = false;
   private warnedKeyIgnored = false;
 
   constructor(@Inject(REVIEWER_STORE) private readonly store: ReviewerStore, @Inject(APP_CONFIG) private readonly cfg: AppConfig) {}
+
+  /** Four-eyes needs named reviewers: say so at startup when it is on but nobody can give an approval yet. Never blocks startup. */
+  async onApplicationBootstrap(): Promise<void> {
+    const eyes = this.cfg.approvalPolicy.fourEyes;
+    if (!eyes || !(eyes.refundOver > 0 || eyes.cancellations)) return;
+    try {
+      if (await this.store.hasAnyReviewer()) return;
+      this.log.warn('Four-eyes approval is configured but no reviewer accounts exist: two-approval actions cannot be approved by the shared key or in demo mode. Create one with `npm run reviewer:add -w apps/api`.');
+    } catch {
+      // the first request will report a database problem; the warning is advice only
+    }
+  }
 
   /** True once any reviewer exists. The store caches the answer briefly. */
   isAccountsMode() {
