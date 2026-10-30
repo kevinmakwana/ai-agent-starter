@@ -177,6 +177,14 @@ describe('startup warning for four-eyes without accounts', () => {
     expect(warn).toHaveBeenCalledTimes(2);
   });
 
+  it('does not fill the mode cache (the next request must ask the store itself)', async () => {
+    warnings();
+    const { auth, store } = await setup({ FOUR_EYES_REFUND_OVER: '100' });
+    const spy = jest.spyOn(store, 'hasAnyReviewer');
+    await auth.onApplicationBootstrap();
+    expect(spy).not.toHaveBeenCalled();
+  });
+
   it('stays quiet when four-eyes is off, or reviewer accounts already exist', async () => {
     const warn = warnings();
     const off = await setup();
@@ -190,7 +198,7 @@ describe('startup warning for four-eyes without accounts', () => {
   it('never fails startup when the database cannot answer', async () => {
     warnings();
     const { auth, store } = await setup({ FOUR_EYES_REFUND_OVER: '100' });
-    jest.spyOn(store, 'hasAnyReviewer').mockRejectedValue(new Error('db down'));
+    jest.spyOn(store, 'listReviewers').mockRejectedValue(new Error('db down'));
     await expect(auth.onApplicationBootstrap()).resolves.toBeUndefined();
   });
 });

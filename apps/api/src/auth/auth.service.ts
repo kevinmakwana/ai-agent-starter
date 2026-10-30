@@ -28,7 +28,8 @@ export class AuthService implements OnApplicationBootstrap {
     const eyes = this.cfg.approvalPolicy.fourEyes;
     if (!eyes || !(eyes.refundOver > 0 || eyes.cancellations)) return;
     try {
-      if (await this.store.hasAnyReviewer()) return;
+      // a direct read, not hasAnyReviewer(): a one-off startup check must not seed that answer's short cache
+      if ((await this.store.listReviewers()).length > 0) return;
       this.log.warn('Four-eyes approval is configured but no reviewer accounts exist: two-approval actions cannot be approved by the shared key or in demo mode. Create one with `npm run reviewer:add -w apps/api`.');
     } catch {
       // the first request will report a database problem; the warning is advice only
