@@ -31,7 +31,7 @@ export interface RunnerDeps {
 
 type Outcome =
   | { kind: 'result'; result: unknown }
-  | { kind: 'pending'; reasoning: string; rule: string; detail: Record<string, unknown> };
+  | { kind: 'pending'; reasoning: string; rule: string; detail: Record<string, unknown>; approvalsRequired: 1 | 2 };
 
 const guardrailResult = (e: GuardrailViolation) => ({ error: e.message, code: e.code });
 
@@ -71,16 +71,33 @@ export class AgentRunner {
 
   /**
    * Applies a decision to a parked action and resumes the paused run. `actor` is 'system' only for the expiry
-   * sweep, which is logged as `expired` rather than as a reviewer's rejection.
+   * sweep, which is logged as `expired` rather than as a reviewer's rejection. `reviewer` is the signed-in person, if
+   * any; shared-key and demo callers pass none, so they cannot give one of two required approvals.
    */
   async decide(
     actionId: string, decision: 'approve' | 'reject', note?: string, actor: 'reviewer' | 'system' = 'reviewer',
+    reviewer?: { id: string; name: string } | null,
   ): Promise<{ action: Action; run: Run }> {
     const { store } = this.deps;
-    if (!(await store.getAction(actionId))) throw new NotFoundError(`Approval ${actionId} not found`);
+    const parked = await store.getAction(actionId);
+    if (!parked) throw new NotFoundError(`Approval ${actionId} not found`);
+
+    if (decision === 'approve' && parked.approvalsRequired > 1) {
+      if (!reviewer) throw new ConflictError('This action needs approval from two reviewers; sign in with a reviewer account', 'FOUR_EYES_NEEDS_ACCOUNTS');
+      const step = await store.approveStep(actionId, reviewer, note);
+      if (!step) throw new ConflictError('This approval has already been decided');
+      if (!step.final) {
+        const run = await store.getRun(step.action.runId);
+        if (!run) throw new NotFoundError('Run no longer exists');
+        return { action: step.action, run }; // the first approval of two: nothing runs, the run keeps waiting
+      }
+      return this.complete(step.action, decision, note);
+    }
+
     const audit: DecisionAudit = {
       kind: actor === 'system' ? 'expired' : decision === 'approve' ? 'approved' : 'rejected',
       actorType: actor,
+      ...(actor === 'reviewer' && reviewer ? { actorId: reviewer.id } : {}),
     };
     const action = await store.decideAction(actionId, decision === 'approve' ? 'approved' : 'rejected', note, audit);
     if (!action) throw new ConflictError('This approval has already been decided');
@@ -219,7 +236,7 @@ export class AgentRunner {
             await store.createAction({
               runId: run.id, conversationId: conv.id, toolName: call.name,
               toolArgs: call.args as Record<string, unknown>, toolCallId: call.id, reasoning: outcome.reasoning,
-              policy: { rule: outcome.rule, detail: outcome.detail },
+              policy: { rule: outcome.rule, detail: outcome.detail }, approvalsRequired: outcome.approvalsRequired,
             });
             for (const skipped of completion.toolCalls.slice(i + 1)) {
               await addStep({
@@ -279,7 +296,7 @@ export class AgentRunner {
         }
         const reason = (call.args as { reason?: string }).reason;
         return {
-          kind: 'pending', rule: decision.rule, detail: decision.detail,
+          kind: 'pending', rule: decision.rule, detail: decision.detail, approvalsRequired: decision.approvalsRequired,
           reasoning: thought || `The agent requested ${call.name}${reason ? `: ${reason}` : ''}`,
         };
       }

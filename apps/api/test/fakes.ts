@@ -83,6 +83,9 @@ export class MemoryStore implements AgentStore {
   steps: Step[] = [];
   actions = new Map<string, Action>();
   events: ApprovalEvent[] = [];
+  /** Four-eyes: who approved which action, and which reviewers still count (deactivating one removes them from here). */
+  approvals = new Map<string, string[]>();
+  activeReviewers = new Set<string>();
   private n = 0;
 
   addConversation(customerId: number): Conversation {
@@ -129,8 +132,10 @@ export class MemoryStore implements AgentStore {
       outputTokens: mine.reduce((n, x) => n + (x.outputTokens ?? 0), 0),
     };
   }
-  async createAction({ policy, ...a }: NewAction) {
-    const action: Action = { ...a, id: `act-${++this.n}`, status: 'pending_approval', decisionNote: null, result: null, createdAt: '', decidedAt: null };
+  async createAction({ policy, approvalsRequired = 1, ...a }: NewAction) {
+    const action: Action = {
+      ...a, id: `act-${++this.n}`, status: 'pending_approval', decisionNote: null, result: null, createdAt: '', decidedAt: null, approvalsRequired,
+    };
     this.actions.set(action.id, action);
     await this.addApprovalEvent({
       kind: 'requested', actionId: action.id, runId: a.runId, conversationId: a.conversationId, actorType: 'policy',
@@ -148,13 +153,31 @@ export class MemoryStore implements AgentStore {
     Object.assign(a, { status, decisionNote: note ?? null, decidedAt: new Date().toISOString() });
     await this.addApprovalEvent({
       kind: audit.kind, actionId: id, runId: a.runId, conversationId: a.conversationId, actorType: audit.actorType,
-      toolName: a.toolName, toolArgs: a.toolArgs, note,
+      actorId: audit.actorId, toolName: a.toolName, toolArgs: a.toolArgs, note,
     });
     return { ...a };
   }
+  async approveStep(id: string, reviewer: { id: string }, note?: string) {
+    const a = this.actions.get(id);
+    if (!a || a.status !== 'pending_approval') return null;
+    const given = this.approvals.get(id) ?? [];
+    const counted = () => given.filter((r) => this.activeReviewers.has(r)).length;
+    const repeat = given.includes(reviewer.id);
+    // a repeat is only a retry once the requirement is already met (the action was reopened after a failed execution)
+    if (repeat && counted() < a.approvalsRequired) throw new ConflictError('You have already approved this', 'ALREADY_APPROVED_BY_YOU');
+    if (!repeat) { given.push(reviewer.id); this.approvals.set(id, given); }
+    const base = { actionId: id, runId: a.runId, conversationId: a.conversationId, actorType: 'reviewer' as const, actorId: reviewer.id, toolName: a.toolName, toolArgs: a.toolArgs, note };
+    if (counted() < a.approvalsRequired) {
+      await this.addApprovalEvent({ ...base, kind: 'first_approval', detail: { given: counted(), required: a.approvalsRequired } });
+      return { action: { ...a }, final: false };
+    }
+    Object.assign(a, { status: 'approved', decisionNote: note ?? null, decidedAt: new Date().toISOString() });
+    await this.addApprovalEvent({ ...base, kind: 'approved' });
+    return { action: { ...a }, final: true };
+  }
   async addApprovalEvent(e: NewApprovalEvent) {
     const event: ApprovalEvent = {
-      id: this.events.length + 1, actionId: null, actorId: null, rule: null, detail: null, note: null, createdAt: '',
+      id: this.events.length + 1, actionId: null, actorId: null, actorName: null, rule: null, detail: null, note: null, createdAt: '',
       ...(Object.fromEntries(Object.entries(e).filter(([, v]) => v !== undefined)) as object),
     } as ApprovalEvent;
     this.events.push(event);

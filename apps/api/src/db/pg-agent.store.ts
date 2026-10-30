@@ -37,6 +37,9 @@ export interface ApprovalView extends Action {
   /** Why a human was needed, from the `requested` audit event. Null on approvals created before the log existed. */
   policyRule: string | null;
   policyDetail: Record<string, unknown> | null;
+  /** Active reviewers who have approved so far, in order (reviewer-only; customers never see this). */
+  approvedBy: string[];
+  approvalsGiven: number;
 }
 
 export class PgAgentStore implements AgentStore {
@@ -192,9 +195,9 @@ export class PgAgentStore implements AgentStore {
   async createAction(a: NewAction): Promise<Action> {
     return this.inTx(async (db) => {
       const { rows } = await db.query(
-        `INSERT INTO actions (run_id, conversation_id, tool_name, tool_args, tool_call_id, reasoning)
-         VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-        [a.runId, a.conversationId, a.toolName, JSON.stringify(a.toolArgs), a.toolCallId, a.reasoning],
+        `INSERT INTO actions (run_id, conversation_id, tool_name, tool_args, tool_call_id, reasoning, approvals_required)
+         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+        [a.runId, a.conversationId, a.toolName, JSON.stringify(a.toolArgs), a.toolCallId, a.reasoning, a.approvalsRequired ?? 1],
       );
       const action = camel<Action>(rows[0]);
       await this.insertEvent(db, {
@@ -225,10 +228,47 @@ export class PgAgentStore implements AgentStore {
       const action = camel<Action>(rows[0]);
       await this.insertEvent(db, {
         kind: audit.kind, actionId: id, runId: action.runId, conversationId: action.conversationId, actorType: audit.actorType,
-        toolName: action.toolName, toolArgs: action.toolArgs, note,
+        actorId: audit.actorId, toolName: action.toolName, toolArgs: action.toolArgs, note,
       });
       await this.publish(db, action.conversationId, 'trace', 'approvals');
       return action;
+    });
+  }
+
+  async approveStep(actionId: string, reviewer: { id: string }, note?: string): Promise<{ action: Action; final: boolean } | null> {
+    return this.inTx(async (db) => {
+      // The row lock serializes every approval of this action: only the transaction that reaches the count executes,
+      // and one reviewer's concurrent requests cannot each see "no approval yet".
+      const { rows } = await db.query('SELECT * FROM actions WHERE id = $1 FOR UPDATE', [actionId]);
+      if (!rows[0] || rows[0].status !== 'pending_approval') return null;
+      const action = camel<Action>(rows[0]);
+      const counted = async () => (await db.query(
+        `SELECT count(*)::int AS n FROM action_approvals aa JOIN reviewers r ON r.id = aa.reviewer_id
+          WHERE aa.action_id = $1 AND r.active`, [actionId],
+      )).rows[0].n as number;
+
+      const { rowCount } = await db.query(
+        'INSERT INTO action_approvals (action_id, reviewer_id, note) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING', [actionId, reviewer.id, note ?? null],
+      );
+      const given = await counted();
+      // A repeat is only a retry once the requirement is already met (the action was reopened after a failed execution).
+      if (rowCount === 0 && given < action.approvalsRequired) throw new ConflictError('You have already approved this', 'ALREADY_APPROVED_BY_YOU');
+
+      const base = {
+        actionId, runId: action.runId, conversationId: action.conversationId, actorType: 'reviewer' as const, actorId: reviewer.id,
+        toolName: action.toolName, toolArgs: action.toolArgs, note,
+      };
+      if (given < action.approvalsRequired) {
+        await this.insertEvent(db, { ...base, kind: 'first_approval', detail: { given, required: action.approvalsRequired } });
+        await this.publish(db, action.conversationId, 'trace', 'approvals');
+        return { action, final: false };
+      }
+      const { rows: done } = await db.query(
+        `UPDATE actions SET status = 'approved', decision_note = $2, decided_at = now() WHERE id = $1 RETURNING *`, [actionId, note ?? null],
+      );
+      await this.insertEvent(db, { ...base, kind: 'approved' });
+      await this.publish(db, action.conversationId, 'trace', 'approvals');
+      return { action: camel<Action>(done[0]), final: true };
     });
   }
 
@@ -240,7 +280,7 @@ export class PgAgentStore implements AgentStore {
        JSON.stringify(e.toolArgs), e.rule ?? null, e.detail ? JSON.stringify(e.detail) : null, e.note ?? null],
     );
     await this.publish(db, e.conversationId, 'audit');
-    return camel<ApprovalEvent>(rows[0]);
+    return { ...camel<ApprovalEvent>(rows[0]), actorName: null }; // names are joined when listing, not when writing
   }
 
   addApprovalEvent(e: NewApprovalEvent): Promise<ApprovalEvent> {
@@ -250,9 +290,10 @@ export class PgAgentStore implements AgentStore {
   async listApprovalEvents(filter: { conversationId?: string; limit?: number; before?: number } = {}): Promise<ApprovalEvent[]> {
     const limit = Math.min(Math.max(filter.limit ?? 100, 1), MAX_EVENTS);
     const { rows } = await this.pool.query(
-      `SELECT * FROM approval_events
-       WHERE ($1::uuid IS NULL OR conversation_id = $1) AND ($2::bigint IS NULL OR id < $2)
-       ORDER BY id DESC LIMIT $3`,
+      `SELECT e.*, r.name AS actor_name FROM approval_events e
+       LEFT JOIN reviewers r ON r.id::text = e.actor_id
+       WHERE ($1::uuid IS NULL OR e.conversation_id = $1) AND ($2::bigint IS NULL OR e.id < $2)
+       ORDER BY e.id DESC LIMIT $3`,
       [filter.conversationId ?? null, filter.before ?? null, limit],
     );
     return rows.map((r) => camel<ApprovalEvent>(r));
@@ -342,7 +383,9 @@ export class PgAgentStore implements AgentStore {
          o.total AS order_total, o.status AS order_status,
          COALESCE((SELECT SUM(amount) FROM refunds r WHERE r.order_id = o.id), 0) AS order_refunded,
          (SELECT e.rule FROM approval_events e WHERE e.action_id = a.id AND e.kind = 'requested' ORDER BY e.id LIMIT 1) AS policy_rule,
-         (SELECT e.detail FROM approval_events e WHERE e.action_id = a.id AND e.kind = 'requested' ORDER BY e.id LIMIT 1) AS policy_detail
+         (SELECT e.detail FROM approval_events e WHERE e.action_id = a.id AND e.kind = 'requested' ORDER BY e.id LIMIT 1) AS policy_detail,
+         COALESCE((SELECT array_agg(r.name ORDER BY aa.created_at, r.id) FROM action_approvals aa JOIN reviewers r ON r.id = aa.reviewer_id
+                    WHERE aa.action_id = a.id AND r.active), '{}') AS approved_by
        FROM actions a
        JOIN conversations c ON c.id = a.conversation_id
        JOIN customers cu ON cu.id = c.customer_id
@@ -351,6 +394,7 @@ export class PgAgentStore implements AgentStore {
        ORDER BY a.created_at DESC LIMIT 200`,
       [filter.status ?? null, filter.conversationId ?? null],
     );
-    return rows.map((r) => camel<ApprovalView>(r));
+    // only active reviewers count toward the rule, so only they are listed
+    return rows.map((r) => ({ ...camel<ApprovalView>(r), approvalsGiven: r.approved_by.length }));
   }
 }
