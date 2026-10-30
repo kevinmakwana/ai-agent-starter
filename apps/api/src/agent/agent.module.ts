@@ -1,5 +1,7 @@
-import { Logger, Module } from '@nestjs/common';
+import { Logger, type MiddlewareConsumer, Module, type NestModule, RequestMethod } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
+import { AuthService } from '../auth/auth.service';
+import { PrincipalMiddleware } from '../auth/principal.middleware';
 import type { AppConfig } from '../config';
 import { PgAgentStore } from '../db/pg-agent.store';
 import { PgShopRepo } from '../db/pg-shop.repo';
@@ -38,6 +40,7 @@ import type { ChatProvider } from './types';
         }),
     },
     ApprovalExpiryScheduler,
+    AuthService,
     NotifierLifecycle,
     {
       provide: StreamBus,
@@ -51,4 +54,9 @@ import type { ChatProvider } from './types';
     { provide: APP_FILTER, useClass: DomainErrorFilter },
   ],
 })
-export class AgentModule {}
+export class AgentModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    // every route, so guards, controllers and SSE streams share one principal per request
+    consumer.apply(PrincipalMiddleware).forRoutes({ path: '{*splat}', method: RequestMethod.ALL });
+  }
+}

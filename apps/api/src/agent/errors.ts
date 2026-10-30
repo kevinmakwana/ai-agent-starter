@@ -1,6 +1,11 @@
 /** Errors the HTTP layer maps to status codes (see http/domain-error.filter.ts). */
 export class NotFoundError extends Error {}
-export class ConflictError extends Error {}
+export class ConflictError extends Error {
+  /** A stable machine-readable reason (e.g. `LAST_ADMIN`) that the HTTP layer passes through next to the message. */
+  constructor(message: string, public readonly code?: string) {
+    super(message);
+  }
+}
 
 /** The upstream LLM failed or was unreachable -> 502 Bad Gateway. */
 export class UpstreamLlmError extends Error {

@@ -13,6 +13,7 @@ export class DomainErrorFilter implements ExceptionFilter {
       : err instanceof ConflictError ? [HttpStatus.CONFLICT, 'Conflict']
       : [HttpStatus.BAD_GATEWAY, 'Bad Gateway'];
     if (err instanceof UpstreamLlmError && err.detail) this.logger.error(`${err.message} :: ${err.detail}`);
-    host.switchToHttp().getResponse<Response>().status(statusCode).json({ statusCode, error, message: err.message });
+    const code = err instanceof ConflictError ? err.code : undefined;
+    host.switchToHttp().getResponse<Response>().status(statusCode).json({ statusCode, error, message: err.message, ...(code && { code }) });
   }
 }

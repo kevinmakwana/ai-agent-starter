@@ -1,5 +1,6 @@
 import { Body, ConflictException, Controller, Get, Inject, Param, ParseUUIDPipe, Post, Req, UseGuards } from '@nestjs/common';
 import type { Request } from 'express';
+import { isReviewerPrincipal, principalOf } from '../auth/principal';
 import type { AppConfig } from '../config';
 import { NotFoundError } from '../agent/errors';
 import { AgentRunner } from '../agent/runner';
@@ -11,7 +12,7 @@ import { ConversationAccessGuard } from './conversation-access.guard';
 import { CreateConversationDto, SendMessageDto } from './dto';
 import { limited } from './rate-limit';
 import { approvalForCaller, forCaller, sumUsage } from './run-view';
-import { isReviewer, ReviewerGuard } from './reviewer.guard';
+import { ReviewerGuard } from './reviewer.guard';
 
 @Controller()
 export class ConversationsController {
@@ -86,7 +87,7 @@ export class ConversationsController {
   }
 
   private isReviewer(req: Request) {
-    return isReviewer(this.cfg.reviewerApiKey, req.headers.authorization);
+    return isReviewerPrincipal(principalOf(req));
   }
 
   private async requireConversation(id: string) {

@@ -1,8 +1,8 @@
-import { type CanActivate, type ExecutionContext, Inject, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import { type CanActivate, type ExecutionContext, ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { timingSafeEqual } from 'node:crypto';
 import type { Request } from 'express';
-import type { AppConfig } from '../config';
-import { APP_CONFIG } from '../tokens';
+import { csrfOk } from '../auth/csrf';
+import { isReviewerPrincipal, principalOf } from '../auth/principal';
 
 /** True when no reviewer key is configured (open demo mode) or the request carries the right one. */
 export function isReviewer(reviewerApiKey: string, authorization: string | undefined): boolean {
@@ -14,21 +14,16 @@ export function isReviewer(reviewerApiKey: string, authorization: string | undef
 }
 
 /**
- * Shared-secret gate for reviewer/operator routes. With REVIEWER_API_KEY unset the API stays open
- * so the zero-config demo works; set it and these routes require `Authorization: Bearer <key>`.
+ * Gate for reviewer/operator routes. It trusts only `req.principal`, which PrincipalMiddleware derives from the session
+ * cookie, the shared key or (zero-config demo) nothing. A cookie request that changes state must also pass the CSRF check.
  */
 @Injectable()
 export class ReviewerGuard implements CanActivate {
-  constructor(@Inject(APP_CONFIG) private readonly cfg: AppConfig) {
-    if (!cfg.reviewerApiKey) {
-      new Logger('Auth').warn('REVIEWER_API_KEY is not set: reviewer routes and all conversations are open (demo mode).');
-    }
-  }
-
   canActivate(ctx: ExecutionContext): boolean {
-    if (!isReviewer(this.cfg.reviewerApiKey, ctx.switchToHttp().getRequest<Request>().headers.authorization)) {
-      throw new UnauthorizedException('Reviewer credentials required');
-    }
+    const req = ctx.switchToHttp().getRequest<Request>();
+    const principal = principalOf(req);
+    if (!isReviewerPrincipal(principal)) throw new UnauthorizedException('Reviewer credentials required');
+    if (!csrfOk(req, principal)) throw new ForbiddenException('Missing X-Requested-By header');
     return true;
   }
 }
