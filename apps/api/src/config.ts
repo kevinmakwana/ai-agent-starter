@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import type { ApprovalPolicyConfig } from './agent/policy';
-import { loadNotifyConfig, type NotifyConfig } from './notify/notify-config';
+import { address, httpUrl, loadNotifyConfig, optional, smtpUrl as validSmtpUrl, type NotifyConfig } from './notify/notify-config';
 
 /** Loads the single root .env (nearest one above cwd). Existing environment variables win. */
 export function loadRootEnv(startDir = process.cwd()): void {
@@ -107,6 +107,37 @@ export interface AuthConfig {
   loginPerMinute: number;
 }
 
+export interface CustomerLoginConfig {
+  /** CUSTOMER_LOGIN=true: customers sign in by emailed link and conversations follow the session, not a token. */
+  enabled: boolean;
+  /** Where the emailed link points (the customer web app), without a trailing slash. */
+  appUrl: string;
+  /** Absolute lifetime of a customer session, in days. */
+  sessionTtlDays: number;
+  /** POST /customer-auth/request and /verify per client per minute (the routes re-read the env per request). */
+  requestPerMinute: number;
+  /** Where link mail goes through; present when LOGIN_SMTP_URL and LOGIN_EMAIL_FROM are set. */
+  mail?: { smtpUrl: string; from: string };
+}
+
+/** Read on its own like the other limits, because route decorators resolve it per request. */
+export const loadCustomerLoginLimit = (env: NodeJS.ProcessEnv = process.env): number => positiveInt(env, 'RATE_LIMIT_CUSTOMER_LOGIN_PER_MINUTE', 5);
+
+function loadCustomerLogin(env: NodeJS.ProcessEnv): CustomerLoginConfig {
+  const enabled = booleanFlag(env, 'CUSTOMER_LOGIN', false);
+  const smtp = optional(env, 'LOGIN_SMTP_URL');
+  const from = optional(env, 'LOGIN_EMAIL_FROM');
+  if ((smtp || from) && !(smtp && from)) throw new Error('LOGIN_SMTP_URL and LOGIN_EMAIL_FROM must be set together');
+  if (enabled && !(smtp && from)) throw new Error('CUSTOMER_LOGIN=true requires LOGIN_SMTP_URL and LOGIN_EMAIL_FROM');
+  return {
+    enabled,
+    appUrl: httpUrl('CUSTOMER_APP_URL', optional(env, 'CUSTOMER_APP_URL') ?? 'http://localhost:3000').replace(/\/+$/, ''),
+    sessionTtlDays: positiveInt(env, 'CUSTOMER_SESSION_TTL_DAYS', 7),
+    requestPerMinute: loadCustomerLoginLimit(env),
+    ...(smtp && from ? { mail: { smtpUrl: validSmtpUrl('LOGIN_SMTP_URL', smtp), from: address('LOGIN_EMAIL_FROM', from) } } : {}),
+  };
+}
+
 export type ProviderName = 'mock' | 'openai' | 'anthropic';
 
 export interface AppConfig {
@@ -130,6 +161,8 @@ export interface AppConfig {
   approvalTtlMinutes: number;
   /** Reviewer sessions and the login rate limit. */
   auth: AuthConfig;
+  /** Customer sign-in by emailed link. Off by default. */
+  customerLogin: CustomerLoginConfig;
   /** Which risky tool calls skip human review (and which need two reviewers). Defaults to none. */
   approvalPolicy: ApprovalPolicyConfig;
   /** Where to announce new pending approvals to reviewers. No channels = notifications off. */
@@ -172,6 +205,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       cookieSecure: booleanFlag(env, 'COOKIE_SECURE', env.NODE_ENV === 'production'),
       loginPerMinute: loadLoginLimit(env),
     },
+    customerLogin: loadCustomerLogin(env),
     approvalPolicy: {
       refundAutoApproveUnder: moneyAmount(env, 'REFUND_AUTO_APPROVE_UNDER', 0),
       fourEyes: {

@@ -153,3 +153,41 @@ describe('account and four-eyes config', () => {
     expect(() => loadConfig({ FOUR_EYES_CANCELLATIONS: 'yes' })).toThrow('FOUR_EYES_CANCELLATIONS');
   });
 });
+
+describe('customer login config', () => {
+  const mail = { LOGIN_SMTP_URL: 'smtp://u:p@smtp.example.com:587', LOGIN_EMAIL_FROM: 'support@example.com' };
+
+  it('is off by default and needs nothing', () => {
+    expect(loadConfig({}).customerLogin).toEqual({
+      enabled: false, appUrl: 'http://localhost:3000', sessionTtlDays: 7, requestPerMinute: 5,
+    });
+  });
+
+  it('turns on only with true, and needs the mail settings', () => {
+    expect(loadConfig({ CUSTOMER_LOGIN: 'true', ...mail }).customerLogin).toMatchObject({
+      enabled: true, mail: { smtpUrl: mail.LOGIN_SMTP_URL, from: 'support@example.com' },
+    });
+    expect(() => loadConfig({ CUSTOMER_LOGIN: 'true' })).toThrow('LOGIN_SMTP_URL');
+    expect(() => loadConfig({ CUSTOMER_LOGIN: 'true', LOGIN_SMTP_URL: mail.LOGIN_SMTP_URL })).toThrow('together');
+    expect(() => loadConfig({ CUSTOMER_LOGIN: 'yes', ...mail })).toThrow('CUSTOMER_LOGIN');
+  });
+
+  it('refuses half a mail setup even when login is off, and validates the values without echoing them', () => {
+    expect(() => loadConfig({ LOGIN_EMAIL_FROM: 'support@example.com' })).toThrow('together');
+    expect(() => loadConfig({ LOGIN_SMTP_URL: 'http://smtp.example.com', LOGIN_EMAIL_FROM: 'a@example.com' })).toThrow('LOGIN_SMTP_URL');
+    let message = '';
+    try { loadConfig({ LOGIN_SMTP_URL: 'ftp://user:secretpw@host', LOGIN_EMAIL_FROM: 'a@example.com' }); } catch (e) { message = (e as Error).message; }
+    expect(message).toContain('LOGIN_SMTP_URL');
+    expect(message).not.toContain('secretpw');
+    expect(() => loadConfig({ LOGIN_SMTP_URL: mail.LOGIN_SMTP_URL, LOGIN_EMAIL_FROM: 'not an address' })).toThrow('LOGIN_EMAIL_FROM');
+  });
+
+  it('trims the app url, validates numbers', () => {
+    expect(loadConfig({ CUSTOMER_APP_URL: 'https://shop.example.com/' }).customerLogin.appUrl).toBe('https://shop.example.com');
+    expect(() => loadConfig({ CUSTOMER_APP_URL: 'javascript:alert(1)' })).toThrow('CUSTOMER_APP_URL');
+    expect(loadConfig({ CUSTOMER_SESSION_TTL_DAYS: '30', RATE_LIMIT_CUSTOMER_LOGIN_PER_MINUTE: '2' }).customerLogin)
+      .toMatchObject({ sessionTtlDays: 30, requestPerMinute: 2 });
+    expect(() => loadConfig({ CUSTOMER_SESSION_TTL_DAYS: '0' })).toThrow('CUSTOMER_SESSION_TTL_DAYS');
+    expect(() => loadConfig({ RATE_LIMIT_CUSTOMER_LOGIN_PER_MINUTE: 'x' })).toThrow('RATE_LIMIT_CUSTOMER_LOGIN_PER_MINUTE');
+  });
+});

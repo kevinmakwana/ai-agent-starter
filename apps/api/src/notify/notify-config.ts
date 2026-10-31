@@ -11,7 +11,7 @@ const ADDRESS = /^[^\s@,<>"]+@[^\s@,<>"]+$/;
 const DEFAULT_CONSOLE_URL = 'http://localhost:3000/reviewer';
 
 /** Empty or whitespace-only counts as unset, so a copied .env.example with blank values stays valid. Values are trimmed. */
-function optional(env: NodeJS.ProcessEnv, name: string): string | undefined {
+export function optional(env: NodeJS.ProcessEnv, name: string): string | undefined {
   const value = env[name]?.trim();
   return value ? value : undefined;
 }
@@ -38,7 +38,7 @@ function secureUrl(name: string, raw: string): string {
   return raw;
 }
 
-function httpUrl(name: string, raw: string): string {
+export function httpUrl(name: string, raw: string): string {
   const url = parseUrl(raw, ['http:', 'https:']);
   if (!url) throw new Error(`${name} must be an http(s) URL`);
   if (hasCredentials(url)) throw new Error(`${name} must not contain a username or password`);
@@ -51,7 +51,7 @@ function httpUrl(name: string, raw: string): string {
  * keys into the transport options, where they would override our hardened settings (`?debug=true`, `?logger=true`,
  * `?tls.rejectUnauthorized=false`, `?socketTimeout=...`).
  */
-function smtpUrl(name: string, raw: string): string {
+export function smtpUrl(name: string, raw: string): string {
   const url = parseUrl(raw, ['smtp:', 'smtps:']);
   if (!url) throw new Error(`${name} must be an smtp:// or smtps:// URL (percent-encode special characters such as @ # : in the user name and password)`);
   if (url.hostname === '') throw new Error(`${name} must include a host`);
@@ -62,7 +62,7 @@ function smtpUrl(name: string, raw: string): string {
 }
 
 /** A single plain address; no whitespace or list/header characters, so it cannot smuggle extra headers. */
-function address(name: string, raw: string): string {
+export function address(name: string, raw: string): string {
   if (!ADDRESS.test(raw)) throw new Error(`${name} must be plain email addresses like alerts@example.com`);
   return raw;
 }

@@ -158,6 +158,25 @@ ALTER TABLE approval_events DROP CONSTRAINT IF EXISTS approval_events_kind_check
 ALTER TABLE approval_events ADD CONSTRAINT approval_events_kind_check
   CHECK (kind IN ('requested', 'auto_approved', 'first_approval', 'approved', 'rejected', 'expired'));
 
+-- Customer login (TODO 4.5b). Links and sessions store only a SHA-256 of the token.
+CREATE TABLE IF NOT EXISTS login_links (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  customer_id int NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  token_hash text NOT NULL UNIQUE,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  expires_at timestamptz NOT NULL,
+  used_at timestamptz
+);
+CREATE INDEX IF NOT EXISTS login_links_customer_idx ON login_links (customer_id, created_at);
+CREATE TABLE IF NOT EXISTS customer_sessions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  customer_id int NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  token_hash text NOT NULL UNIQUE,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  last_seen_at timestamptz NOT NULL DEFAULT now(),
+  expires_at timestamptz NOT NULL
+);
+CREATE INDEX IF NOT EXISTS customer_sessions_customer_idx ON customer_sessions (customer_id);
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS cancel_action_id uuid;
 CREATE UNIQUE INDEX IF NOT EXISTS orders_cancel_action_uniq ON orders (cancel_action_id) WHERE cancel_action_id IS NOT NULL;
 
@@ -172,4 +191,4 @@ CREATE TABLE IF NOT EXISTS shipments (
 `;
 
 export const RESET_SQL =
-  'TRUNCATE customers, orders, tickets, refunds, shipments, conversations, runs, steps, actions, approval_events, reviewers, reviewer_sessions, action_approvals RESTART IDENTITY CASCADE';
+  'TRUNCATE customers, orders, tickets, refunds, shipments, conversations, runs, steps, actions, approval_events, reviewers, reviewer_sessions, action_approvals, login_links, customer_sessions RESTART IDENTITY CASCADE';
