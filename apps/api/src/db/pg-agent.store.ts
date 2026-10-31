@@ -26,6 +26,15 @@ export interface ConversationSummary extends Conversation {
   totalTokens: number;
 }
 
+/** What a customer sees in their own list: no token usage, no reviewer counts. */
+export interface MyConversation {
+  id: string;
+  title: string;
+  createdAt: string;
+  lastStatus: string | null;
+  awaitingApproval: boolean;
+}
+
 export interface ApprovalView extends Action {
   customerName: string;
   customerEmail: string;
@@ -80,6 +89,29 @@ export class PgAgentStore implements AgentStore {
       [customerId, title, hashToken(accessToken)],
     );
     return { ...(await this.getConversation(rows[0].id))!, accessToken };
+  }
+
+  /** Login mode: no token is issued, so the conversation is reachable only through its customer's session (or a reviewer). */
+  async createConversationForCustomer(customerId: number, title: string): Promise<Conversation> {
+    const { rows } = await this.pool.query('INSERT INTO conversations (customer_id, title) VALUES ($1, $2) RETURNING id', [customerId, title]);
+    return (await this.getConversation(rows[0].id))!;
+  }
+
+  async conversationBelongsToCustomer(conversationId: string, customerId: number): Promise<boolean> {
+    const { rowCount } = await this.pool.query('SELECT 1 FROM conversations WHERE id = $1 AND customer_id = $2', [conversationId, customerId]);
+    return (rowCount ?? 0) > 0;
+  }
+
+  /** What a customer may see in their own list: no token usage, no reviewer counts. */
+  async listConversationsForCustomer(customerId: number): Promise<MyConversation[]> {
+    const { rows } = await this.pool.query(
+      `SELECT c.id, c.title, c.created_at,
+              (SELECT status FROM runs r WHERE r.conversation_id = c.id ORDER BY r.created_at DESC LIMIT 1) AS last_status,
+              EXISTS (SELECT 1 FROM actions a WHERE a.conversation_id = c.id AND a.status = 'pending_approval') AS awaiting_approval
+         FROM conversations c WHERE c.customer_id = $1 ORDER BY c.created_at DESC, c.id DESC LIMIT 100`,
+      [customerId],
+    );
+    return rows.map((r) => camel<MyConversation>(r));
   }
 
   async verifyConversationToken(id: string, token: string): Promise<boolean> {

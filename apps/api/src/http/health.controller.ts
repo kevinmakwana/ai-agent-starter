@@ -18,6 +18,6 @@ export class HealthController {
       throw new ServiceUnavailableException({ status: 'error', db: 'down', provider: this.cfg.provider });
     }
     const reviewerAccounts = await this.auth.isAccountsMode();
-    return { status: 'ok', db: 'up', provider: this.cfg.provider, reviewerAuth: Boolean(this.cfg.reviewerApiKey) || reviewerAccounts, reviewerAccounts };
+    return { status: 'ok', db: 'up', provider: this.cfg.provider, reviewerAuth: Boolean(this.cfg.reviewerApiKey) || reviewerAccounts, reviewerAccounts, customerLogin: this.cfg.customerLogin.enabled };
   }
 }

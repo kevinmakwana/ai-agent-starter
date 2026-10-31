@@ -23,14 +23,24 @@ export class AuthService implements OnApplicationBootstrap {
 
   constructor(@Inject(REVIEWER_STORE) private readonly store: ReviewerStore, @Inject(APP_CONFIG) private readonly cfg: AppConfig) {}
 
-  /** Four-eyes needs named reviewers: say so at startup when it is on but nobody can give an approval yet. Never blocks startup. */
+  /**
+   * Say so at startup when four-eyes is on but nobody can give an approval yet, and when customer login is on while
+   * the reviewer routes are still open (no key, no account). Advice only: never blocks startup.
+   */
   async onApplicationBootstrap(): Promise<void> {
     const eyes = this.cfg.approvalPolicy.fourEyes;
-    if (!eyes || !(eyes.refundOver > 0 || eyes.cancellations)) return;
+    const fourEyes = Boolean(eyes && (eyes.refundOver > 0 || eyes.cancellations));
+    const openReviewerSide = this.cfg.customerLogin.enabled && !this.cfg.reviewerApiKey;
+    if (!fourEyes && !openReviewerSide) return;
     try {
       // a direct read, not hasAnyReviewer(): a one-off startup check must not seed that answer's short cache
       if ((await this.store.listReviewers()).length > 0) return;
-      this.log.warn('Four-eyes approval is configured but no reviewer accounts exist: two-approval actions cannot be approved by the shared key or in demo mode. Create one with `npm run reviewer:add -w apps/api`.');
+      if (fourEyes) {
+        this.log.warn('Four-eyes approval is configured but no reviewer accounts exist: two-approval actions cannot be approved by the shared key or in demo mode. Create one with `npm run reviewer:add -w apps/api`.');
+      }
+      if (openReviewerSide) {
+        this.log.warn('Customer login is on but reviewer routes are open (no REVIEWER_API_KEY and no reviewer account): anyone can use /approvals. Create a reviewer with `npm run reviewer:add -w apps/api` or set REVIEWER_API_KEY.');
+      }
     } catch {
       // the first request will report a database problem; the warning is advice only
     }

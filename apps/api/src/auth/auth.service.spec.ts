@@ -202,3 +202,25 @@ describe('startup warning for four-eyes without accounts', () => {
     await expect(auth.onApplicationBootstrap()).resolves.toBeUndefined();
   });
 });
+
+describe('startup warning for customer login with open reviewer routes', () => {
+  const MAIL = { CUSTOMER_LOGIN: 'true', LOGIN_SMTP_URL: 'smtp://localhost:1025', LOGIN_EMAIL_FROM: 'support@example.com' };
+
+  it('warns when login is on but there is neither a reviewer key nor a reviewer account', async () => {
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const { auth } = await setup(MAIL);
+    await auth.onApplicationBootstrap();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0][0])).toMatch(/customer login.*reviewer routes are open/i);
+  });
+
+  it('stays quiet with a reviewer key, with a reviewer account, or with login off', async () => {
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    await (await setup({ ...MAIL, REVIEWER_API_KEY: 'k' })).auth.onApplicationBootstrap();
+    const withAccount = await setup(MAIL);
+    await withAccount.add();
+    await withAccount.auth.onApplicationBootstrap();
+    await (await setup()).auth.onApplicationBootstrap();
+    expect(warn).not.toHaveBeenCalled();
+  });
+});

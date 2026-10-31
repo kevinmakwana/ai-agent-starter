@@ -1,6 +1,9 @@
 import { Logger, type MiddlewareConsumer, Module, type NestModule, RequestMethod } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
 import { AuthService } from '../auth/auth.service';
+import { CustomerAuthService } from '../auth/customer-auth.service';
+import { createLoginMailer, type LoginMailer } from '../auth/login-mailer';
+import { LOGIN_MAILER } from '../auth/tokens';
 import { PrincipalMiddleware } from '../auth/principal.middleware';
 import type { AppConfig } from '../config';
 import { PgAgentStore } from '../db/pg-agent.store';
@@ -43,6 +46,14 @@ import type { ChatProvider } from './types';
     },
     ApprovalExpiryScheduler,
     AuthService,
+    {
+      provide: LOGIN_MAILER,
+      inject: [APP_CONFIG],
+      // null when login is off: nothing can send mail, and no SMTP settings are needed
+      useFactory: (cfg: AppConfig): LoginMailer | null =>
+        cfg.customerLogin.enabled && cfg.customerLogin.mail ? createLoginMailer(cfg.customerLogin.mail) : null,
+    },
+    CustomerAuthService,
     NotifierLifecycle,
     {
       provide: StreamBus,
