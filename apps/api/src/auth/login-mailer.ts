@@ -25,7 +25,9 @@ export function createLoginMailer({ smtpUrl, from, transport }: { smtpUrl: strin
         await transporter.sendMail({ from, to, subject: 'Your sign-in link', text });
       } catch (err) {
         const code = (err as { code?: unknown } | null)?.code;
-        throw new Error(typeof code === 'string' && CODE.test(code) ? `login email failed (${code})` : 'login email failed');
+        // the validated code travels as `.code` too, so the caller can log it without parsing the message
+        if (typeof code === 'string' && CODE.test(code)) throw Object.assign(new Error(`login email failed (${code})`), { code });
+        throw new Error('login email failed');
       }
     },
     close() {

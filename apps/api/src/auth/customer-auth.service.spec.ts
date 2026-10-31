@@ -3,7 +3,8 @@ import { MemoryCustomerAuthStore } from '../../test/fake-customers';
 import { loadConfig } from '../config';
 import { CUSTOMER_COOKIE } from './cookie';
 import { CustomerAuthService } from './customer-auth.service';
-import type { LoginMailer } from './login-mailer';
+import * as nodemailer from 'nodemailer';
+import { createLoginMailer, type LoginMailer } from './login-mailer';
 
 const AVA = { id: 1, name: 'Ava Brooks', email: 'ava.brooks@example.com' };
 const BEN = { id: 2, name: 'Ben Carter', email: 'ben.carter@example.com' };
@@ -66,6 +67,20 @@ describe('requestLink', () => {
     await expect(service.requestLink(AVA.email)).resolves.toBeUndefined();
     await expect(service.drain()).resolves.toBeUndefined();
     expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0][0])).not.toMatch(/ava|example\.com|token=/i);
+  });
+
+  it('logs the SMTP error code of the real mailer, and still neither the address nor the link', async () => {
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const transport = nodemailer.createTransport({ jsonTransport: true });
+    const reject = Object.assign(new Error(`535 auth failed for ${AVA.email}`), { code: 'EAUTH' });
+    jest.spyOn(transport, 'sendMail').mockImplementation(() => Promise.reject(reject));
+    const mailer = createLoginMailer({ smtpUrl: 'smtp://u:p@smtp.example.com:587', from: 'support@example.com', transport });
+    const { service } = setup({}, mailer);
+    await service.requestLink(AVA.email);
+    await service.drain();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0][0])).toContain('EAUTH');
     expect(String(warn.mock.calls[0][0])).not.toMatch(/ava|example\.com|token=/i);
   });
 

@@ -61,6 +61,26 @@ maybe('customer auth store (e2e, real Postgres)', () => {
       expect(await store.consumeLoginLink('b1')).not.toBeNull();
     });
 
+    it('a request that waits for the lock behind newer ones is still the newest: its link is not dead on arrival', async () => {
+      const holder = await pool.connect();
+      try {
+        await holder.query('BEGIN');
+        await holder.query('SELECT pg_advisory_xact_lock(hashtext($1))', ['login-link:1']);
+        // X starts its transaction first, then blocks on the lock the holder has
+        const x = store.createLoginLink(1, 'x', 15, LIMITS);
+        await new Promise((r) => setTimeout(r, 200));
+        // while it waits, two later requests get their rows in
+        for (const h of ['y', 'z']) {
+          await holder.query(`INSERT INTO login_links (customer_id, token_hash, created_at, expires_at) VALUES (1, $1, clock_timestamp(), clock_timestamp() + interval '15 minutes')`, [h]);
+        }
+        await holder.query('COMMIT');
+        expect(await x).toBe(true);
+      } finally {
+        holder.release();
+      }
+      expect(await store.consumeLoginLink('x')).not.toBeNull(); // the link that was just mailed must work
+    });
+
     it('are limited to 5 per customer per rolling hour, even when requested at the same instant', async () => {
       await Promise.all(Array.from({ length: 6 }, () => pool.query('SELECT pg_sleep(0.05)')));
       const results = await Promise.all(Array.from({ length: 10 }, (_, i) => store.createLoginLink(1, `h${i}`, 15, LIMITS)));

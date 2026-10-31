@@ -25,6 +25,7 @@ describe('createLoginMailer', () => {
     jest.spyOn(transport, 'sendMail').mockImplementation(() => Promise.reject(authError));
     const err = await createLoginMailer({ ...options, transport }).sendLink('ava@example.com', link, 15).catch((e) => e);
     expect(err.message).toBe('login email failed (EAUTH)');
+    expect(err.code).toBe('EAUTH'); // so the caller can log the code without parsing the message
     jest.spyOn(transport, 'sendMail').mockImplementation(() => Promise.reject(new Error('boom with ava@example.com')));
     const plain = await createLoginMailer({ ...options, transport }).sendLink('ava@example.com', link, 15).catch((e) => e);
     expect(plain.message).toBe('login email failed');

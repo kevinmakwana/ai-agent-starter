@@ -21,8 +21,10 @@ export class PgCustomerAuthStore implements CustomerAuthStore {
         await client.query('ROLLBACK');
         return false;
       }
+      // clock_timestamp(), not now(): now() is when the transaction began, which can be before requests that got the lock
+      // first, and "newest" must mean the order the rows were inserted in or this link could expire itself below.
       await client.query(
-        'INSERT INTO login_links (customer_id, token_hash, expires_at) VALUES ($1, $2, now() + make_interval(mins => $3))',
+        'INSERT INTO login_links (customer_id, token_hash, created_at, expires_at) VALUES ($1, $2, clock_timestamp(), clock_timestamp() + make_interval(mins => $3))',
         [customerId, tokenHash, ttlMinutes],
       );
       // Only the newest few unused links stay usable.
