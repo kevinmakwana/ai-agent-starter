@@ -15,5 +15,48 @@ services:
       timeout: 3s
       retries: 20
 
+  # Full stack: `docker compose up --build`. `npm run db:up` still starts only the database.
+  # Both apps read the optional root .env; the lines under `environment` win over it, so a .env written
+  # for `npm run dev` (localhost URLs) cannot point the containers at the wrong host.
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      args:
+        NODE_IMAGE: ${NODE_IMAGE:-node:22-alpine}
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # A password with @ : / # % must be percent-encoded here.
+      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-aiagent}
+      API_PORT: "3001"
+      # NODE_ENV=production makes the session cookie Secure, which plain http://localhost cannot keep in every browser.
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+    ports:
+      - "127.0.0.1:${API_PORT:-3001}:3001"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        NODE_IMAGE: ${NODE_IMAGE:-node:22-alpine}
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      API_URL: http://api:3001
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   pgdata:

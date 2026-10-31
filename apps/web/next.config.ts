@@ -9,6 +9,11 @@ if (existsSync(rootEnv)) process.loadEnvFile(rootEnv);
 
 const nextConfig: NextConfig = {
   devIndicators: false,
+  // The Docker image sets NEXT_STANDALONE=1 to get a self-contained server.js; the tracing root is the monorepo root.
+  ...(process.env.NEXT_STANDALONE === '1' && {
+    output: 'standalone',
+    outputFileTracingRoot: resolve(process.cwd(), '../..'),
+  }),
 };
 
 export default nextConfig;

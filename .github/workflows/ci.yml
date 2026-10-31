@@ -35,3 +35,10 @@ jobs:
       - name: Test (unit + e2e against Postgres)
         run: npm test
       - run: npm run build
+
+  docker:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build the API and web images
+        run: docker compose build api web
