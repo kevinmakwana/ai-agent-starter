@@ -84,7 +84,7 @@ All DDL is idempotent (`IF NOT EXISTS`) and the new tables are added to `RESET_S
   (`UPDATE login_links SET used_at = now() WHERE token_hash = $1 AND used_at IS NULL AND expires_at > now() RETURNING
   customer_id`), so two requests with the same token yield exactly one session. Success: a new `customer_session` row, the
   cookie, and `200 { customer: { id, name, email } }`. Every failure (unknown, expired, used, malformed) is the same
-  `401 Invalid or expired link`.
+  `401 Invalid or expired link`. A `token` that is not a string is `400` (validation); every string problem is the `401`.
 - **CSRF.** Both endpoints need `X-Requested-By` (see section 4), so a cross-origin page cannot trigger a mail or fix
   an attacker's session onto a victim (login CSRF); `SameSite=Strict` is the second layer.
 
@@ -116,9 +116,11 @@ All DDL is idempotent (`IF NOT EXISTS`) and the new tables are added to `RESET_S
 
 - `Principal` gains `{ kind: 'customer'; customerId: number; email: string; name: string }`, resolved only in login mode,
   from the customer cookie. `PrincipalMiddleware` still runs first for every route.
-- Resolution order in login mode: reviewer principal first (reviewer cookie, or the key / demo rules of 4.5a), then the
-  customer cookie. Both cookies may exist in one browser; a reviewer cookie wins, so a reviewer testing the customer page
-  is a reviewer there (the customer page sends the CSRF header too).
+- Resolution order in login mode: a reviewer principal that is a signed-in reviewer or the shared key wins; otherwise
+  (anonymous, or the open demo) a valid customer session makes the caller a customer. The open demo therefore does not
+  hide a customer session, and a customer on an open demo has no reviewer access there. Both cookies may exist in one
+  browser; a reviewer cookie wins, so a reviewer testing the customer page is a reviewer there (the customer page sends
+  the CSRF header too).
 - **A customer is not a reviewer.** `isReviewerPrincipal` currently means "anything but `none`". It must be `demo`, `key`
   or `reviewer` only. Every use is audited in this change: `ReviewerGuard`, `AdminGuard`, `approvalForCaller`,
   `forCaller`, the conversation `trace`/`send` views, `csrfOk` and `/auth/me`. A customer principal on a reviewer route is
@@ -131,7 +133,8 @@ All DDL is idempotent (`IF NOT EXISTS`) and the new tables are added to `RESET_S
   - login off: unchanged (token or reviewer).
 - `POST /conversations`: in login mode requires a customer session (reviewers and everyone else `401`), refuses a body with
   `customerId` or `email` (`400`), binds the conversation to the session's customer and returns it without an
-  `accessToken`. `title` stays optional. With login off: unchanged.
+  `accessToken`. `title` stays optional. With login off: unchanged. `CreateConversationDto` no longer requires
+  `customerId`/`email` in the DTO; with login off the controller still answers `400` when neither is given.
 - `GET /my/conversations`: a customer's own conversations, newest first, with the same summary shape the reviewer list
   uses minus reviewer-only fields (no token usage, no pending-approval counts beyond a boolean `awaitingApproval`).
   Without a customer principal: `401`.
