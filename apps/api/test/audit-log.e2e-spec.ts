@@ -6,6 +6,7 @@ import { AppModule } from '../src/app.module';
 import { PgAgentStore } from '../src/db/pg-agent.store';
 import { seedDatabase } from '../src/db/seed-data';
 import { configureApp } from '../src/http/setup';
+import { REVIEWER_STORE } from '../src/auth/tokens';
 import { PG_POOL } from '../src/tokens';
 
 // Runs against a real Postgres; skipped unless E2E_DATABASE_URL is set (CI sets it).
@@ -64,6 +65,28 @@ maybe('approval audit log in the store (real Postgres)', () => {
     await store.decideAction(action.id, 'approved', 'looks fine');
     const [decision] = await store.listApprovalEvents({ conversationId: conv.id });
     expect(decision).toMatchObject({ kind: 'approved', actionId: action.id, actorType: 'reviewer', note: 'looks fine', toolArgs });
+  });
+
+  it('names the reviewer on a decision, keeps the name after deactivation, and shows none for key or system decisions', async () => {
+    const reviewers = app.get(REVIEWER_STORE);
+    const admin = await reviewers.createReviewer({ email: 'admin@example.com', name: 'Ada Admin', role: 'admin', passwordHash: 'x' });
+    const alex = await reviewers.createReviewer({ email: 'alex@example.com', name: 'Alex Reviewer', role: 'reviewer', passwordHash: 'x' });
+    const named = await park();
+    await store.decideAction(named.action.id, 'approved', 'ok', { kind: 'approved', actorType: 'reviewer', actorId: alex.id });
+    const keyed = await park();
+    await store.decideAction(keyed.action.id, 'rejected', 'no'); // shared key / demo: no identity
+    const expired = await park();
+    await store.decideAction(expired.action.id, 'rejected', 'late', { kind: 'expired', actorType: 'system' });
+
+    await reviewers.updateReviewer(alex.id, { active: false });
+    expect(admin.id).toBeDefined();
+    const byAction = async (a: { id: string }, c: { id: string }) =>
+      (await store.listApprovalEvents({ conversationId: c.id })).find((e) => e.actionId === a.id && e.kind !== 'requested');
+    expect(await byAction(named.action, named.conv)).toMatchObject({ kind: 'approved', actorType: 'reviewer', actorId: alex.id, actorName: 'Alex Reviewer' });
+    expect(await byAction(keyed.action, keyed.conv)).toMatchObject({ kind: 'rejected', actorType: 'reviewer', actorId: null, actorName: null });
+    expect(await byAction(expired.action, expired.conv)).toMatchObject({ kind: 'expired', actorType: 'system', actorId: null, actorName: null });
+    // policy-written events (requested) never carry a name either
+    expect((await store.listApprovalEvents({ conversationId: named.conv.id })).at(-1)).toMatchObject({ kind: 'requested', actorName: null });
   });
 
   it('writes exactly one decision event when two decisions race', async () => {

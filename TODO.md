@@ -38,7 +38,9 @@
 - [x] 4.2 Threshold-based approval policy per tool.
 - [x] 4.3 Audit log of approval decisions, shown in the reviewer console.
 - [x] 4.4 Reviewer notifications on new pending approvals (webhook, then email/Slack).
-- [ ] 4.5 Per-reviewer accounts, four-eyes rule, then customer login.
+- [x] 4.5 Per-reviewer accounts, four-eyes rule, then customer login.
+  - [x] 4.5a Reviewer accounts and four-eyes
+  - [x] 4.5b Customer login (email magic link)
 - [x] 4.6 More tools: `cancel_order` (risky), `track_shipment`.
 
 ## Phase 5: Tooling and operations

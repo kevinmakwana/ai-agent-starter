@@ -6,10 +6,15 @@ export const CUSTOMER_RUN_ERROR = 'Something went wrong on our side. Please try 
 export const forCaller = <R extends Run>(run: R, reviewer: boolean): R =>
   reviewer || run.error === null ? run : { ...run, error: CUSTOMER_RUN_ERROR };
 
-/** Why a human was needed (rule, threshold) and whether reviewers were notified are reviewer-only: customers never see them. */
-export const approvalForCaller = <A extends { policyRule?: unknown; policyDetail?: unknown; notifiedAt?: unknown }>(a: A, reviewer: boolean): A => {
+/**
+ * Why a human was needed (rule, threshold), whether reviewers were notified, and the four-eyes progress (how many
+ * approvals, by whom) are reviewer-only: customers never see them.
+ */
+export const approvalForCaller = <
+  A extends { policyRule?: unknown; policyDetail?: unknown; notifiedAt?: unknown; approvalsRequired?: unknown; approvalsGiven?: unknown; approvedBy?: unknown; approvedByIds?: unknown },
+>(a: A, reviewer: boolean): A => {
   if (reviewer) return a;
-  const { policyRule: _rule, policyDetail: _detail, notifiedAt: _notified, ...rest } = a;
+  const { policyRule: _rule, policyDetail: _detail, notifiedAt: _notified, approvalsRequired: _req, approvalsGiven: _given, approvedBy: _by, approvedByIds: _byIds, ...rest } = a;
   return rest as A;
 };
 

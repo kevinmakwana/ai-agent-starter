@@ -98,14 +98,18 @@ export interface Action {
   result: unknown;
   createdAt: string;
   decidedAt: string | null;
+  /** Distinct reviewers who must approve before the call runs (1, or 2 under the four-eyes policy). Fixed when parked. */
+  approvalsRequired: number;
 }
 
 export type NewAction = Pick<Action, 'runId' | 'conversationId' | 'toolName' | 'toolArgs' | 'toolCallId' | 'reasoning'> & {
   /** Why a human is needed; becomes the rule and detail of the `requested` audit event. */
   policy?: { rule: string; detail: Record<string, unknown> };
+  /** From the approval policy; defaults to 1. */
+  approvalsRequired?: 1 | 2;
 };
 
-export type ApprovalEventKind = 'requested' | 'auto_approved' | 'approved' | 'rejected' | 'expired';
+export type ApprovalEventKind = 'requested' | 'auto_approved' | 'first_approval' | 'approved' | 'rejected' | 'expired';
 export type ApprovalActorType = 'reviewer' | 'system' | 'policy';
 
 /** One immutable line of the approval audit log. */
@@ -117,8 +121,10 @@ export interface ApprovalEvent {
   runId: string;
   conversationId: string;
   actorType: ApprovalActorType;
-  /** Reserved for reviewer accounts; always null until they exist. */
+  /** The reviewer's id for decisions made by a signed-in reviewer; null for policy, system, shared-key and demo callers. */
   actorId: string | null;
+  /** The reviewer's current name, joined when listing (so it survives deactivation); null when there is no reviewer. */
+  actorName: string | null;
   toolName: string;
   /** The call as it was at that moment. */
   toolArgs: Record<string, unknown>;
@@ -135,6 +141,8 @@ export type NewApprovalEvent = Pick<ApprovalEvent, 'kind' | 'runId' | 'conversat
 export interface DecisionAudit {
   kind: 'approved' | 'rejected' | 'expired';
   actorType: 'reviewer' | 'system';
+  /** The signed-in reviewer who decided, when there is one. */
+  actorId?: string;
 }
 
 export interface ShipmentEvent {
@@ -188,6 +196,13 @@ export interface AgentStore {
   getAction(id: string): Promise<Action | null>;
   /** Atomic claim: only succeeds while the action is still pending_approval. Writes the decision event in the same transaction. */
   decideAction(id: string, status: 'approved' | 'rejected', note?: string, audit?: DecisionAudit): Promise<Action | null>;
+  /**
+   * One reviewer's approval of an action that needs two, atomically (the action row is locked). Below the requirement it
+   * records the approval and a `first_approval` event and leaves the action pending (`final: false`); the approval that
+   * reaches the requirement, counted over active reviewers only, performs the approve transition (`final: true`).
+   * Null when the action is not pending. Throws ConflictError `ALREADY_APPROVED_BY_YOU` for a repeat approval.
+   */
+  approveStep(actionId: string, reviewer: { id: string }, note?: string): Promise<{ action: Action; final: boolean } | null>;
   addApprovalEvent(event: NewApprovalEvent): Promise<ApprovalEvent>;
   /** Newest first. `before` is an event id to page from. */
   listApprovalEvents(filter?: { conversationId?: string; limit?: number; before?: number }): Promise<ApprovalEvent[]>;

@@ -1,14 +1,22 @@
-import { Logger, Module } from '@nestjs/common';
+import { Logger, type MiddlewareConsumer, Module, type NestModule, RequestMethod } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
+import { AuthService } from '../auth/auth.service';
+import { CustomerAuthService } from '../auth/customer-auth.service';
+import { createLoginMailer, type LoginMailer } from '../auth/login-mailer';
+import { LOGIN_MAILER } from '../auth/tokens';
+import { PrincipalMiddleware } from '../auth/principal.middleware';
 import type { AppConfig } from '../config';
 import { PgAgentStore } from '../db/pg-agent.store';
 import { PgShopRepo } from '../db/pg-shop.repo';
 import { StreamBus, pgListenConnection } from '../events/stream-bus';
+import { AuthController } from '../http/auth.controller';
 import { ApprovalsController } from '../http/approvals.controller';
 import { ConversationsController } from '../http/conversations.controller';
+import { CustomerAuthController } from '../http/customer-auth.controller';
 import { DomainErrorFilter } from '../http/domain-error.filter';
 import { EventsController } from '../http/events.controller';
 import { HealthController } from '../http/health.controller';
+import { ReviewersController } from '../http/reviewers.controller';
 import { NotifierLifecycle } from '../notify/notifier.lifecycle';
 import { createProvider } from '../providers';
 import { APP_CONFIG, CHAT_PROVIDER } from '../tokens';
@@ -18,7 +26,7 @@ import { AgentRunner } from './runner';
 import type { ChatProvider } from './types';
 
 @Module({
-  controllers: [HealthController, ConversationsController, ApprovalsController, EventsController],
+  controllers: [HealthController, ConversationsController, ApprovalsController, EventsController, AuthController, ReviewersController, CustomerAuthController],
   providers: [
     { provide: CHAT_PROVIDER, inject: [APP_CONFIG], useFactory: (cfg: AppConfig) => createProvider(cfg) },
     {
@@ -38,6 +46,15 @@ import type { ChatProvider } from './types';
         }),
     },
     ApprovalExpiryScheduler,
+    AuthService,
+    {
+      provide: LOGIN_MAILER,
+      inject: [APP_CONFIG],
+      // null when login is off: nothing can send mail, and no SMTP settings are needed
+      useFactory: (cfg: AppConfig): LoginMailer | null =>
+        cfg.customerLogin.enabled && cfg.customerLogin.mail ? createLoginMailer(cfg.customerLogin.mail) : null,
+    },
+    CustomerAuthService,
     NotifierLifecycle,
     {
       provide: StreamBus,
@@ -51,4 +68,9 @@ import type { ChatProvider } from './types';
     { provide: APP_FILTER, useClass: DomainErrorFilter },
   ],
 })
-export class AgentModule {}
+export class AgentModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    // every route, so guards, controllers and SSE streams share one principal per request
+    consumer.apply(PrincipalMiddleware).forRoutes({ path: '{*splat}', method: RequestMethod.ALL });
+  }
+}

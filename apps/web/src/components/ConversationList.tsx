@@ -9,14 +9,19 @@ interface Props {
   /** `null` while the directory is still loading; `[]` when it can't be listed (then an email is asked for). */
   customers?: Customer[] | null;
   onCreate?: (who: { customerId: number } | { email: string }) => void;
+  /** Login mode: the customer comes from the session, so there is nothing to pick or type. */
+  onNew?: () => void;
 }
 
-export function ConversationList({ conversations, customers, selectedId, onSelect, onCreate }: Props) {
+export function ConversationList({ conversations, customers, selectedId, onSelect, onCreate, onNew }: Props) {
   const [customerId, setCustomerId] = useState<number | ''>('');
   const [email, setEmail] = useState('');
   return (
     <aside className="panel sidebar">
       <div className="panel-head"><h2>Conversations</h2></div>
+      {onNew && (
+        <div className="new-chat single"><button className="btn primary" onClick={onNew}>New conversation</button></div>
+      )}
       {onCreate && (
         <form
           className="new-chat"

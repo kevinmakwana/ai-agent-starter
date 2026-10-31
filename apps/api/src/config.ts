@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import type { ApprovalPolicyConfig } from './agent/policy';
-import { loadNotifyConfig, type NotifyConfig } from './notify/notify-config';
+import { address, httpUrl, loadNotifyConfig, optional, smtpUrl as validSmtpUrl, type NotifyConfig } from './notify/notify-config';
 
 /** Loads the single root .env (nearest one above cwd). Existing environment variables win. */
 export function loadRootEnv(startDir = process.cwd()): void {
@@ -61,6 +61,9 @@ function moneyAmount(env: NodeJS.ProcessEnv, name: string, fallback: number): nu
   return n;
 }
 
+/** POST /auth/login per client per minute; read on its own like the limits above. */
+export const loadLoginLimit = (env: NodeJS.ProcessEnv = process.env): number => positiveInt(env, 'RATE_LIMIT_LOGIN_PER_MINUTE', 10);
+
 /** Read on their own because route decorators resolve them per request. */
 export const loadRateLimits = (env: NodeJS.ProcessEnv = process.env): RateLimits => ({
   perMinute: positiveInt(env, 'RATE_LIMIT_PER_MINUTE', 600),
@@ -86,6 +89,55 @@ function parseTrustProxy(raw = ''): number | false {
   return n;
 }
 
+/** Strictly `true` or `false`; anything else is a startup error rather than a guess. */
+function booleanFlag(env: NodeJS.ProcessEnv, name: string, fallback: boolean): boolean {
+  const raw = env[name];
+  if (raw === undefined || raw === '') return fallback;
+  if (raw === 'true') return true;
+  if (raw === 'false') return false;
+  throw new Error(`${name} must be true or false (got "${raw}")`);
+}
+
+export interface AuthConfig {
+  /** Absolute lifetime of a reviewer session, in hours. */
+  sessionTtlHours: number;
+  /** Adds `Secure` to the session cookie. Defaults to true when NODE_ENV=production. */
+  cookieSecure: boolean;
+  /** POST /auth/login per client per minute. */
+  loginPerMinute: number;
+}
+
+export interface CustomerLoginConfig {
+  /** CUSTOMER_LOGIN=true: customers sign in by emailed link and conversations follow the session, not a token. */
+  enabled: boolean;
+  /** Where the emailed link points (the customer web app), without a trailing slash. */
+  appUrl: string;
+  /** Absolute lifetime of a customer session, in days. */
+  sessionTtlDays: number;
+  /** POST /customer-auth/request and /verify per client per minute (the routes re-read the env per request). */
+  requestPerMinute: number;
+  /** Where link mail goes through; present when LOGIN_SMTP_URL and LOGIN_EMAIL_FROM are set. */
+  mail?: { smtpUrl: string; from: string };
+}
+
+/** Read on its own like the other limits, because route decorators resolve it per request. */
+export const loadCustomerLoginLimit = (env: NodeJS.ProcessEnv = process.env): number => positiveInt(env, 'RATE_LIMIT_CUSTOMER_LOGIN_PER_MINUTE', 5);
+
+function loadCustomerLogin(env: NodeJS.ProcessEnv): CustomerLoginConfig {
+  const enabled = booleanFlag(env, 'CUSTOMER_LOGIN', false);
+  const smtp = optional(env, 'LOGIN_SMTP_URL');
+  const from = optional(env, 'LOGIN_EMAIL_FROM');
+  if ((smtp || from) && !(smtp && from)) throw new Error('LOGIN_SMTP_URL and LOGIN_EMAIL_FROM must be set together');
+  if (enabled && !(smtp && from)) throw new Error('CUSTOMER_LOGIN=true requires LOGIN_SMTP_URL and LOGIN_EMAIL_FROM');
+  return {
+    enabled,
+    appUrl: httpUrl('CUSTOMER_APP_URL', optional(env, 'CUSTOMER_APP_URL') ?? 'http://localhost:3000').replace(/\/+$/, ''),
+    sessionTtlDays: positiveInt(env, 'CUSTOMER_SESSION_TTL_DAYS', 7),
+    requestPerMinute: loadCustomerLoginLimit(env),
+    ...(smtp && from ? { mail: { smtpUrl: validSmtpUrl('LOGIN_SMTP_URL', smtp), from: address('LOGIN_EMAIL_FROM', from) } } : {}),
+  };
+}
+
 export type ProviderName = 'mock' | 'openai' | 'anthropic';
 
 export interface AppConfig {
@@ -107,7 +159,11 @@ export interface AppConfig {
   contextMaxTokens: number;
   /** Pending approvals older than this many minutes are auto-rejected. 0 = never expire. */
   approvalTtlMinutes: number;
-  /** Which risky tool calls skip human review. Defaults to none. */
+  /** Reviewer sessions and the login rate limit. */
+  auth: AuthConfig;
+  /** Customer sign-in by emailed link. Off by default. */
+  customerLogin: CustomerLoginConfig;
+  /** Which risky tool calls skip human review (and which need two reviewers). Defaults to none. */
   approvalPolicy: ApprovalPolicyConfig;
   /** Where to announce new pending approvals to reviewers. No channels = notifications off. */
   notify: NotifyConfig;
@@ -144,7 +200,19 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     conversationTokenBudget: positiveInt(env, 'CONVERSATION_TOKEN_BUDGET', 200_000),
     contextMaxTokens: positiveInt(env, 'CONTEXT_MAX_TOKENS', 8000),
     approvalTtlMinutes: nonNegativeInt(env, 'APPROVAL_TTL_MINUTES', 1440),
-    approvalPolicy: { refundAutoApproveUnder: moneyAmount(env, 'REFUND_AUTO_APPROVE_UNDER', 0) },
+    auth: {
+      sessionTtlHours: positiveInt(env, 'SESSION_TTL_HOURS', 12),
+      cookieSecure: booleanFlag(env, 'COOKIE_SECURE', env.NODE_ENV === 'production'),
+      loginPerMinute: loadLoginLimit(env),
+    },
+    customerLogin: loadCustomerLogin(env),
+    approvalPolicy: {
+      refundAutoApproveUnder: moneyAmount(env, 'REFUND_AUTO_APPROVE_UNDER', 0),
+      fourEyes: {
+        refundOver: moneyAmount(env, 'FOUR_EYES_REFUND_OVER', 0),
+        cancellations: booleanFlag(env, 'FOUR_EYES_CANCELLATIONS', false),
+      },
+    },
     notify: loadNotifyConfig(env),
     llmMaxRetries: nonNegativeInt(env, 'LLM_MAX_RETRIES', 2),
     llmMaxTokens: env.LLM_MAX_TOKENS ? positiveInt(env, 'LLM_MAX_TOKENS', 0) : undefined,

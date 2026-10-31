@@ -1,5 +1,7 @@
-import { Body, ConflictException, Controller, Get, Inject, Param, ParseUUIDPipe, Post, Req, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, ConflictException, Controller, Get, Inject, Param, ParseUUIDPipe, Post, Req, UseGuards, ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import type { Request } from 'express';
+import { csrfOk } from '../auth/csrf';
+import { customerOf, isReviewerPrincipal, principalOf } from '../auth/principal';
 import type { AppConfig } from '../config';
 import { NotFoundError } from '../agent/errors';
 import { AgentRunner } from '../agent/runner';
@@ -8,10 +10,11 @@ import { PgAgentStore } from '../db/pg-agent.store';
 import { PgShopRepo } from '../db/pg-shop.repo';
 import { APP_CONFIG, PG_POOL } from '../tokens';
 import { ConversationAccessGuard } from './conversation-access.guard';
+import { CustomerGuard } from './customer.guard';
 import { CreateConversationDto, SendMessageDto } from './dto';
 import { limited } from './rate-limit';
 import { approvalForCaller, forCaller, sumUsage } from './run-view';
-import { isReviewer, ReviewerGuard } from './reviewer.guard';
+import { ReviewerGuard } from './reviewer.guard';
 
 @Controller()
 export class ConversationsController {
@@ -33,15 +36,35 @@ export class ConversationsController {
     return rows;
   }
 
-  /** Returns the conversation plus its one-time `accessToken`. Who may *start* one is still unauthenticated (see README). */
+  /** Login off: returns the conversation plus its one-time `accessToken`. Login on: only a signed-in customer may start one, as themselves. */
   @Post('conversations')
   @limited((l) => l.startPerMinute)
-  async create(@Body() dto: CreateConversationDto) {
+  async create(@Body() dto: CreateConversationDto, @Req() req: Request) {
+    if (this.cfg.customerLogin.enabled) return this.createForCustomer(dto, req);
+    if (dto.customerId == null && dto.email == null) throw new BadRequestException('customerId or email is required');
     const customer = dto.customerId
       ? await this.shop.getCustomer(dto.customerId)
       : await this.pool.query('SELECT id, name, email FROM customers WHERE lower(email) = lower($1)', [dto.email]).then((r) => r.rows[0]);
     if (!customer) throw new NotFoundError(`Customer ${dto.customerId ?? dto.email} not found`);
     return this.store.createConversation(customer.id, dto.title ?? `Chat with ${customer.name}`);
+  }
+
+  private async createForCustomer(dto: CreateConversationDto, req: Request) {
+    const principal = principalOf(req);
+    const customer = customerOf(principal);
+    if (!customer) throw new UnauthorizedException('Sign in to start a conversation');
+    if (!csrfOk(req, principal)) throw new ForbiddenException('Missing X-Requested-By header');
+    if (dto.customerId !== undefined || dto.email !== undefined) {
+      throw new BadRequestException('customerId and email are not accepted: a conversation belongs to the signed-in customer');
+    }
+    return this.store.createConversationForCustomer(customer.customerId, dto.title ?? `Chat with ${customer.name}`);
+  }
+
+  /** The signed-in customer's own conversations (login mode). */
+  @Get('my/conversations')
+  @UseGuards(CustomerGuard)
+  my(@Req() req: Request) {
+    return this.store.listConversationsForCustomer(customerOf(principalOf(req))!.customerId); // CustomerGuard guarantees a customer
   }
 
   /** Reviewer-only: customers only ever see conversations they hold a token for. */
@@ -86,7 +109,7 @@ export class ConversationsController {
   }
 
   private isReviewer(req: Request) {
-    return isReviewer(this.cfg.reviewerApiKey, req.headers.authorization);
+    return isReviewerPrincipal(principalOf(req));
   }
 
   private async requireConversation(id: string) {

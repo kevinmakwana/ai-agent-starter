@@ -41,7 +41,7 @@ maybe('approval flow (e2e, real Postgres)', () => {
     beforeEach(() => boot());
 
     it('reports health', async () => {
-      await http().get('/health').expect(200).expect({ status: 'ok', db: 'up', provider: 'mock', reviewerAuth: false });
+      await http().get('/health').expect(200).expect({ status: 'ok', db: 'up', provider: 'mock', reviewerAuth: false, reviewerAccounts: false, customerLogin: false });
     });
 
     it('lookup -> refund request -> pending approval -> approve -> refund recorded', async () => {

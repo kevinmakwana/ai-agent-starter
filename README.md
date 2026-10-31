@@ -105,23 +105,84 @@ It asks "What did I order in order #1, and has any of it been refunded?", valida
 
 | Method & path | Purpose |
 | --- | --- |
-| `POST /conversations` | Create a conversation bound to `{ customerId }` or `{ email }`; returns the conversation plus its one-time `accessToken` |
+| `POST /conversations` | Create a conversation bound to `{ customerId }` or `{ email }`; returns the conversation plus its one-time `accessToken`. With `CUSTOMER_LOGIN=true`: only a signed-in customer, with an empty body, and no `accessToken` is issued |
 | `GET /conversations` | 🔒 reviewer: list all conversations (with pending-approval counts) |
 | `GET /conversations/:id` | 🔑 Full trace: runs → steps, plus approvals and token `usage` (per run and per conversation, with the budget) |
 | `POST /conversations/:id/messages` | 🔑 Send `{ content }`; runs the agent until it answers or pauses (`409` while another run is in progress or an approval is pending) |
 | `GET /conversations/:id/events` | 🔑 SSE stream of `trace` signals for one conversation (`429` over `STREAM_MAX_PER_CONVERSATION`) |
 | `GET /approvals?status=pending` | 🔒  List approvals (`pending` \| `approved` \| `rejected` \| `all`) with customer, order (total, refunded so far, current `orderStatus`) and reasoning context |
-| `GET /approvals/events` | 🔒 Append-only audit log of approval decisions, newest first (`conversationId`, `limit` up to 200, `before` event id). Kinds: `requested`, `auto_approved`, `approved`, `rejected`, `expired` |
-| `POST /approvals/:id` | 🔒 `{ decision: "approve" \| "reject", note? }`; executes the parked call and resumes the run (`409` if already decided) |
+| `GET /approvals/events` | 🔒 Append-only audit log of approval decisions, newest first (`conversationId`, `limit` up to 200, `before` event id). Kinds: `requested`, `auto_approved`, `first_approval`, `approved`, `rejected`, `expired`. Each carries `actorId` and `actorName` when a signed-in reviewer did it |
+| `POST /approvals/:id` | 🔒 `{ decision: "approve" \| "reject", note? }`; executes the parked call and resumes the run (`409` if already decided). An action that needs two approvals (see [Accounts and four-eyes](#accounts-and-four-eyes)) only runs on the second |
+| `POST /auth/login` · `POST /auth/logout` · `GET /auth/me` · `POST /auth/password` | Reviewer sessions: sign in with `{ email, password }` (sets the cookie), sign out, who am I, change my password |
+| `GET /reviewers` · `POST /reviewers` · `PATCH /reviewers/:id` | 🛡 admin: list, add, and edit reviewers (name, role, active, a new password) |
 | `GET /events` | 🔒 SSE stream of `trace` / `approvals` / `audit` signals for the reviewer console (`429` over `STREAM_MAX_REVIEWER`) |
 | `GET /customers` | 🔒 Customers for the demo picker (extra) |
-| `GET /health` | API + database + active provider + whether reviewer auth is on |
+| `POST /customer-auth/request` · `POST /customer-auth/verify` · `POST /customer-auth/logout` · `POST /customer-auth/logout-all` · `GET /customer-auth/me` | Customer login (`CUSTOMER_LOGIN=true`, otherwise `404`): ask for a link by `{ email }` (always `202`), redeem it with `{ token }` (sets the cookie), sign out, sign out everywhere, who am I. See [Customer login](#customer-login) |
+| `GET /my/conversations` | 🍪 A signed-in customer's own conversations (login mode) |
+| `GET /health` | API + database + active provider, `reviewerAuth` (a key or accounts are required) and `reviewerAccounts` (at least one reviewer exists) and `customerLogin` |
 
-🔒 = reviewer key (`Authorization: Bearer <REVIEWER_API_KEY>`). 🔑 = the conversation's `X-Conversation-Token`, or the reviewer key. Both are open when `REVIEWER_API_KEY` is unset (demo mode).
+🔒 = a reviewer: the session cookie once reviewer accounts exist, otherwise the shared key (`Authorization: Bearer <REVIEWER_API_KEY>`). 🔑 = the conversation's `X-Conversation-Token`, or a reviewer. 🛡 = a reviewer with the `admin` role (a signed-in person: the shared key and demo mode have no identity and get `403`). 🍪 = a signed-in customer (the `customer_session` cookie). In login mode 🔑 means that customer's session (or a reviewer) instead of the token. Both 🔒 and 🔑 are open when no reviewer exists and `REVIEWER_API_KEY` is unset (demo mode).
 
 Events are signals only (`{ "conversationId": "…" }`, no content; `resync` carries `{}`): clients refetch the normal endpoints to see what changed. The client sends its credential in headers (a `fetch`-based reader, not `EventSource`, which cannot set headers), and every connect is followed by a refetch.
 
 Validation uses `class-validator` with `whitelist` + `forbidNonWhitelisted` (unknown fields → `400`). Upstream LLM failures return `502` with a clear message and mark the run `failed`. A failed run's stored error is shown verbatim only to reviewers; customers get a generic message.
+
+## Accounts and four-eyes
+
+Reviewers can have their own accounts, so the audit log names the person who decided, and two different people can be required for the riskiest actions.
+
+**Modes** (decided per request, from the database):
+
+| Reviewers in the database | `REVIEWER_API_KEY` | Mode | Reviewer routes accept |
+| --- | --- | --- | --- |
+| none | unset | demo (open) | everyone, as before |
+| none | set | key | `Authorization: Bearer <key>`, as before |
+| one or more | any | accounts | a valid session cookie only; the key is ignored (a warning is logged) |
+
+Creating the first reviewer switches a running API to accounts mode (the "any reviewers?" answer is cached for up to 5 s in each process, so another replica can take that long to notice).
+
+**First admin.** There is no HTTP route for this. Run it where the database is reachable; the password comes from the environment or a hidden prompt, never from a flag (so it stays out of shell history):
+
+```bash
+REVIEWER_PASSWORD='a long passphrase' npm run reviewer:add -w apps/api -- --email you@example.com --name "You"
+# or run it without REVIEWER_PASSWORD in a terminal to be prompted twice
+```
+
+It fails if the email exists or the password is shorter than 12 characters. Note that `npm run seed` resets every table, reviewer accounts and sessions included, so run it before creating the first admin, not after. Further reviewers are added by an admin in the console's **Reviewers** tab (or `POST /reviewers`).
+
+**Sign-in and sessions.** Email + password (scrypt, N=2^15; 12 to 200 characters). A session is a random 32-byte token in the `reviewer_session` cookie (`HttpOnly`, `SameSite=Strict`, `Path=/`, `Secure` when `COOKIE_SECURE=true`, which defaults to true when `NODE_ENV=production`). Only its SHA-256 is stored. A session ends on logout, after `SESSION_TTL_HOURS` (12) in total, after 30 idle minutes, when its reviewer is deactivated or demoted, and when a password is changed or reset (changing your own keeps the session you are using and ends the others). Every login issues a new token. Every failure is the same `401 Invalid email or password` (unknown email, wrong password, deactivated, locked), and an unknown email still pays for a hash. Five wrong passwords in a row lock the account for 15 minutes; `POST /auth/login` also has its own per-client limit (`RATE_LIMIT_LOGIN_PER_MINUTE`).
+
+**CSRF.** A request authenticated by the cookie that is not `GET`/`HEAD` must carry `X-Requested-By: reviewer-console`, otherwise `403`. The console's fetch helper adds it to every non-GET call. A cross-origin page cannot add a custom header without a CORS preflight, which the exact-origin `CORS_ORIGINS` list refuses, and `SameSite=Strict` is a second layer. Key and demo requests carry no cookie and are not affected. The cookie rides along on the customer chat too, so a reviewer signed in to the same browser is treated as a reviewer there.
+
+**Roles.** `reviewer` decides approvals. `admin` also manages reviewers. The last active admin cannot be deactivated or demoted (`409 LAST_ADMIN`, serialized with an advisory lock so two admins cannot demote each other at once).
+
+**Four-eyes.** Set `FOUR_EYES_REFUND_OVER` (dollars; this refund's amount strictly over it) and/or `FOUR_EYES_CANCELLATIONS=true`. An action that qualifies is parked with `approvals_required = 2`, **fixed at that moment** (changing the settings later does not change parked approvals). Then:
+
+- The first approval records who gave it and a `first_approval` audit event; nothing runs and the customer's run keeps waiting. The second approval, from a **different active reviewer**, runs the action once.
+- Approving happens under a row lock on the action, so two reviewers approving at the same instant execute exactly once, and one reviewer racing two requests cannot supply both approvals (`409 ALREADY_APPROVED_BY_YOU`).
+- **One rejection rejects.** Expiry still rejects a half-approved action, as the system.
+- A reviewer who is deactivated after approving no longer counts; the next approver is again the first. Their name stays in the audit history.
+- The shared key and demo mode cannot give an approval on a two-approval action (`409 FOUR_EYES_NEEDS_ACCOUNTS`); they can still reject. If four-eyes is on while no reviewer exists, the API says so at startup.
+- If the action fails to run (infrastructure error) it goes back to pending with its approvals kept, and either approver can press Approve again to retry it.
+- Business rules (refund balance, cancellation eligibility) are still re-checked when the action runs, and refunds and cancellations stay idempotent per action.
+- Customers never see any of it: their view omits `approvalsRequired`, `approvalsGiven`, `approvedBy`, `approvedByIds` and the policy fields.
+
+## Customer login
+
+Optional (`CUSTOMER_LOGIN=true`). Without it nothing changes: anyone can start a conversation as a customer, and a conversation is protected by its token (see Security notes). With it, a customer proves who they are by email, and a conversation belongs to that verified customer.
+
+| `CUSTOMER_LOGIN` | A conversation is reached with | A conversation is started by |
+| --- | --- | --- |
+| unset / `false` | its token, or a reviewer | a body `customerId` or `email` |
+| `true` | the session of the customer it belongs to, or a reviewer | the signed-in customer (a body `customerId` or `email` is `400`) |
+
+**Flow.** The customer enters their email; `POST /customer-auth/request` always answers `202` (it says nothing about whether the email is a customer). If it is one, a one-time link is mailed to it (the mail is sent after the response). The link is `<CUSTOMER_APP_URL>/login#token=...`: the token is in the fragment, so it never reaches a server log or a `Referer`, and the landing page removes it from the address bar. The page redeems it with `POST /customer-auth/verify`, which sets the `customer_session` cookie (`HttpOnly`, `SameSite=Strict`, `Secure` under `COOKIE_SECURE`, `CUSTOMER_SESSION_TTL_DAYS` absolute, 24 idle hours). Links last 15 minutes and work once; at most 5 are created per customer per hour and only the 2 newest unused ones stay valid; every failure to redeem one is the same `401`. Only the SHA-256 of a link or session token is stored. Mutations authenticated by the cookie (and both unauthenticated `/customer-auth` POSTs) need the `X-Requested-By: reviewer-console` header.
+
+**Access.** A conversation is readable, writable and streamable only by the customer it belongs to (or a reviewer); another customer, an anonymous caller and an unknown id all get the same `401`. `GET /my/conversations` lists the caller's own, including ones created before login mode. A customer is never a reviewer: `/approvals`, `/customers`, `/events` and the other reviewer routes are `401` for them, and their view of a conversation omits the policy, notification and four-eyes fields. In login mode conversation tokens are no longer accepted, and the open demo (no reviewer, no key) does not let an anonymous caller into conversations (reviewer routes stay open there, and the API warns at startup). If both a reviewer cookie and a customer cookie are present, the reviewer wins.
+
+**Mail.** Set `LOGIN_SMTP_URL` and `LOGIN_EMAIL_FROM` (checked like the notification SMTP settings: remote hosts need STARTTLS, no credentials in other URLs, nothing is logged). Login mode refuses to start without them. This sender is separate from the reviewer notification channel, which must carry no customer data.
+
+Limits: the link is as safe as the customer's mailbox; a stolen session cookie is that customer's session until it expires or they sign out; a nuisance caller can use up a customer's hourly link allowance; no sign-up, passwords, MFA or SSO; failed mail is logged, not retried; the SMTP leg has only been exercised once by hand against a local Mailpit catcher (plain SMTP on localhost), never a live provider or the STARTTLS/AUTH path (the tests use nodemailer's JSON transport).
 
 ## Reviewer notifications
 
@@ -235,12 +296,22 @@ One root `.env` (see [.env.example](.env.example)); everything is optional.
 | `DATABASE_URL` | built from the above | Full connection string override |
 | `API_PORT` | `3001` | NestJS port (1-65535) |
 | `API_URL` | `http://localhost:3001` | Where Next.js proxies `/api/*` |
-| `REVIEWER_API_KEY` | _(unset)_ | If set, reviewer routes require `Authorization: Bearer <key>` and conversations require their access token; unset = open demo mode |
+| `REVIEWER_API_KEY` | _(unset)_ | If set (and no reviewer account exists), reviewer routes require `Authorization: Bearer <key>` and conversations require their access token; unset = open demo mode. Ignored once a reviewer account exists |
 | `AGENT_MAX_STEPS` | `8` | Max model calls per run (positive integer; invalid values stop the API at startup) |
 | `CONVERSATION_TOKEN_BUDGET` | `200000` | Max tokens (input + output) per conversation; after that the agent stops calling the model and the run ends `budget_exceeded`. A soft cap: the call that crosses it still completes |
 | `CONTEXT_MAX_TOKENS` | `8000` | Rough cap on the history sent per model call. Whole old turns are left out (the model is told); the stored trace is never trimmed |
 | `APPROVAL_TTL_MINUTES` | `1440` | Pending approvals older than this are auto-rejected and the agent tells the customer. `0` = never |
 | `REFUND_AUTO_APPROVE_UNDER` | `0` | Dollars. A refund is approved automatically (and logged as `auto_approved`) when it plus earlier refunds on the same order stays strictly under this amount. `0` = every refund waits for a reviewer. Does not apply to cancellations, which always wait |
+| `FOUR_EYES_REFUND_OVER` | `0` | Dollars. A refund of strictly more than this needs two different reviewers. `0`/unset = off. Needs reviewer accounts |
+| `FOUR_EYES_CANCELLATIONS` | `false` | `true` makes every cancellation need two reviewers. Only `true` or `false` are accepted (anything else stops the API at startup) |
+| `SESSION_TTL_HOURS` | `12` | Absolute lifetime of a reviewer session (positive integer); sessions also end after 30 idle minutes |
+| `COOKIE_SECURE` | `true` if `NODE_ENV=production`, else `false` | Adds `Secure` to the session cookie. Set `false` explicitly for a plain-HTTP deployment |
+| `RATE_LIMIT_LOGIN_PER_MINUTE` | `10` | Per-client limit on `POST /auth/login` |
+| `CUSTOMER_LOGIN` | `false` | `true` turns on customer sign-in by emailed link (see [Customer login](#customer-login)); only `true` or `false` are accepted. Needs `LOGIN_SMTP_URL` and `LOGIN_EMAIL_FROM` |
+| `LOGIN_SMTP_URL`, `LOGIN_EMAIL_FROM` | _(unset)_ | The mail server and sender for sign-in links; both or neither (required when `CUSTOMER_LOGIN=true`) |
+| `CUSTOMER_APP_URL` | `http://localhost:3000` | Where the emailed link points (the customer web app), without a trailing slash |
+| `CUSTOMER_SESSION_TTL_DAYS` | `7` | Absolute lifetime of a customer session (positive integer); sessions also end after 24 idle hours |
+| `RATE_LIMIT_CUSTOMER_LOGIN_PER_MINUTE` | `5` | Per-client limit on `POST /customer-auth/request` and `/verify` |
 | `RATE_LIMIT_PER_MINUTE` | `600` | Per-client limit across the API (`/health` is exempt) |
 | `RATE_LIMIT_START_PER_MINUTE` / `RATE_LIMIT_MESSAGES_PER_MINUTE` | `10` / `20` | Stricter per-client limits on `POST /conversations` and `POST /conversations/:id/messages` |
 | `CORS_ORIGINS` | _(empty)_ | Comma-separated exact origins allowed to call the API from a browser. Empty = none |
@@ -275,6 +346,10 @@ E2E_DATABASE_URL=postgres://postgres:postgres@localhost:5432/aiagent npm test   
 - **Stream e2e:** against real Postgres, `/events` and `/conversations/:id/events` deliver `trace` / `approvals` / `audit` to the right audience only, refuse bad credentials and malformed ids, enforce the caps (including for a differently-cased id), publish nothing for a rolled-back write, send `resync` after the `LISTEN` backend is killed, and end promptly on `app.close()`.
 - **Notifications (Jest):** config validation, the note builder's allowlist (including hostile tool arguments), the webhook signature, Slack escaping, the email message (against nodemailer's JSON transport, no SMTP server), retry timing (with an injected sleep recorder; fake timers only in the debounce and sweep tests), timeouts and log redaction with fake channels, non-overlapping passes, and release on shutdown.
 - **Notifications e2e:** against real Postgres, claims are handed out once and never overlap between concurrent claimers; a signed webhook reaches a local receiver exactly once per parked approval (also with two replicas) and carries none of the customer's data; a decision sends nothing; a failing receiver is retried three times and logged without its URL; shutdown releases rows it had not started; nothing is claimed with no channel configured; `notifiedAt` is hidden from customers (with a reviewer key set).
+- **Accounts (Jest):** password hashing (format, tampered or absurd parameters, length bounds), config parsing, principal resolution in every mode, login uniformity and lockout, the cookie and CSRF helpers, the first-admin command's argument rules, and the four-eyes policy table and runner flow with in-memory fakes (first approval keeps it pending, same reviewer refused, second reviewer executes once, reject, deactivated approver not counted, key caller refused, expiry, retry after a failed execution).
+- **Accounts e2e:** against real Postgres, the reviewer store (sessions, expiry, idle, lockout counters under concurrency, the last-admin lock), login/logout/cookie attributes, uniform `401`s, session end on deactivation and password change, CSRF on every mutating cookie route, the shared key being ignored once a reviewer exists, `/events` with the cookie, admin routes, no secrets in any response, and four-eyes over HTTP (one reviewer's repeat, a nine-reviewer race that must execute once, reject, deactivation, expiry, cancellations, the customer's view, audit names).
+- **Web unit:** also the proxy (forwards the cookie and `X-Requested-By`, returns every `Set-Cookie`), the CSRF header on the API client, and the approval-progress helpers.
+- **Customer login:** unit tests for the link and session lifecycle (expiry, idle, single use, keep-newest-2, hourly cap, mail failure and no leak into logs, answered before the mail is sent), the principals (a customer is not a reviewer), the principal middleware order, CSRF for customer cookies, the mail sender and the config. E2E against real Postgres: link and session store semantics (concurrent races for single use and for the hourly cap), the routes (uniform `202` and `401`, cookie attributes, CSRF, rate limit, logout and logout-all), and cross-customer access to every conversation route and stream, the open-demo and reviewer-wins cases, and login off changing nothing. Web: the fragment reader, the screen helper and the CSRF header on the customer calls.
 - CI runs typecheck, tests (with a Postgres service container) and build on every push.
 
 Regenerate the README screenshots with the stack running: `npm run screenshot` (needs `npx playwright install chromium` once).
@@ -283,11 +358,12 @@ Regenerate the README screenshots with the stack running: `npm run screenshot` (
 
 This is a **starter, not a production service**. What is and isn't protected:
 
-- **Reviewer routes** (`/approvals`, `/customers`, listing all conversations) require `Authorization: Bearer <REVIEWER_API_KEY>` once that variable is set (constant-time compare, `401` otherwise). The reviewer console at `/reviewer` asks for the key and keeps it in that tab's `sessionStorage`; the Next.js proxy holds no secrets.
-- **Conversations are capability-protected.** `POST /conversations` returns a random `accessToken` once; only its SHA-256 hash is stored. Reading or posting to a conversation needs that token (or the reviewer key), and unknown ids and wrong tokens are both `401`, so ids can't be probed. The customer page keeps its tokens in `localStorage`.
-- **Demo mode is open.** With `REVIEWER_API_KEY` unset the API logs a warning and skips all of the above so the zero-config demo works. Set the key for anything beyond a local demo.
-- **Still not solved: who may start a conversation.** There is no customer login, so anyone can start a conversation as any customer by `customerId` or account email. The guardrails bind *the agent* to that customer; they can't prove *the caller is* that customer. Plug in a real identity provider (derive the customer from the session, not the body) before using real data.
-- **Reviewer identity is one shared key**: no per-reviewer accounts, no four-eyes rule (approver ≠ requester). Decisions are logged, but the log does not say *which* reviewer decided.
+- **Reviewer routes** (`/approvals`, `/customers`, listing all conversations) need a reviewer: a session cookie once reviewer accounts exist, otherwise `Authorization: Bearer <REVIEWER_API_KEY>` when that variable is set (constant-time compare, `401` otherwise). In key mode the console asks for the key and keeps it in that tab's `sessionStorage`; in accounts mode the credential is an `HttpOnly` cookie that page scripts cannot read. The Next.js proxy holds no secrets and forwards the cookie and `X-Requested-By` exactly as the browser sent them.
+- **Conversations are capability-protected.** `POST /conversations` returns a random `accessToken` once; only its SHA-256 hash is stored. Reading or posting to a conversation needs that token (or the reviewer key; with `CUSTOMER_LOGIN=true`, the owning customer's session instead, see [Customer login](#customer-login)), and unknown ids and wrong tokens are both `401`, so ids can't be probed. The customer page keeps its tokens in `localStorage`.
+- **Demo mode is open.** With no reviewer account and `REVIEWER_API_KEY` unset the API logs a warning and skips all of the above so the zero-config demo works. Create a reviewer (or set the key) for anything beyond a local demo.
+- **Who may start a conversation.** With `CUSTOMER_LOGIN=true` the customer comes from a verified session (a magic link emailed to the account address), never from the request body; see [Customer login](#customer-login). Without it (the default) the original caveat stands: there is no customer login, so anyone can start a conversation as any customer by `customerId` or account email. The guardrails bind *the agent* to that customer; they can't prove *the caller is* that customer. Turn login on (and use a reviewer account or key) before using real data.
+- **Reviewer identity.** With accounts, every decision names the reviewer (id and name) and four-eyes can require two different people. Without accounts (demo or key mode) the log still cannot say which reviewer decided. Reviewer-management actions (adding, deactivating, resetting a password) are written to the application log with actor and target ids, not to the audit table, and never contain a password.
+- **Accounts: what is protected and what is not.** Passwords are scrypt hashes; session tokens are stored only as SHA-256; no hash, lockout counter or token appears in a response, a log line or a validation error. Account lockout can be used to lock a known email out for 15 minutes (a known trade-off; the failures still answer `401`). There is no email-based password reset (an admin sets a new password), no MFA, no SSO, and scrypt parameters are not upgraded on login. Sessions are server-side rows, so there is no stateless token to revoke.
 - Upstream LLM error bodies are logged server-side only and never returned to clients.
 - **HTTP hardening.** `helmet` sets standard security headers, CORS is off unless `CORS_ORIGINS` lists exact origins, and requests are rate limited per client (`429` with `Retry-After`), most tightly on starting conversations and sending messages since those cost LLM calls.
 - **Client identity behind proxies.** Rate limits key on the client address. Without `TRUST_PROXY` that is the socket peer, so behind the bundled Next.js proxy every customer shares one bucket (fine for a demo, too coarse for production). Set `TRUST_PROXY=1` only when a trusted load balancer in front sets `X-Forwarded-For`; if the proxy is directly exposed, clients can spoof the header.
@@ -299,8 +375,8 @@ This is a **starter, not a production service**. What is and isn't protected:
 - **Cancellations are replay-safe.** The approval's id is stored on the order as `cancel_action_id` (unique, and never returned to the model). Re-running an approval whose cancellation already committed, as crash recovery or a reviewer retry can, reports the cancellation again instead of failing or cancelling twice.
 - **Auto-approval is opt-in and cumulative.** With `REFUND_AUTO_APPROVE_UNDER` unset nothing is auto-approved. When set, the check counts earlier refunds on the order, so a large refund cannot be split into small ones; it does not cap refunds across a customer's different orders. The check is not atomic: two conversations of the same customer refunding the same order at the same instant can both pass it and briefly exceed the threshold, but the over-refund guard in `createRefund` still caps the total at the order total. The `auto_approved` event records the policy decision and is written before the refund runs; the refund does not run if the event cannot be written. If a guardrail inside `createRefund` then rejects the call, the log shows an auto-approval with no refund behind it.
 - **Audit log.** `approval_events` is append-only and written in the same transaction as the decision it records. If execution fails after a reviewer's decision is claimed and the reviewer retries, the log shows two decision rows for that one action; the history stays accurate rather than being rewritten. In the reviewer console the **Audit log** tab shows these events, and pending approval cards carry a short "why a human is needed" hint (reviewers only).
-- **Streams use the same auth as the REST API.** `/conversations/:id/events` needs the conversation token (or reviewer key) and `/events` needs the reviewer key, sent as headers, never in a URL. The same guards run before the stream opens, so a bad credential is an ordinary `401`. Events carry no content (only a kind and a conversation id), customers never receive `approvals` or `audit` signals, and streams are capped per conversation and for the reviewer (`429`).
-- **Customers never see the policy.** The customer view of `GET /conversations/:id` omits the policy fields (`policyRule`, `policyDetail`), so the threshold and the rule that applied are visible to reviewers only.
+- **Streams use the same auth as the REST API.** `/conversations/:id/events` needs the conversation token (or the customer's session in login mode, or a reviewer) and `/events` needs a reviewer: the key or the session cookie, sent as headers, never in a URL. The same guards run before the stream opens, so a bad credential is an ordinary `401`. Events carry no content (only a kind and a conversation id), customers never receive `approvals` or `audit` signals, and streams are capped per conversation and for the reviewer (`429`).
+- **Customers never see the policy.** The customer view of `GET /conversations/:id` omits the policy fields (`policyRule`, `policyDetail`) and the four-eyes progress (`approvalsRequired`, `approvalsGiven`, `approvedBy`, `approvedByIds`), so the threshold, the rule that applied and who approved are visible to reviewers only.
 - **Crash recovery.** If the process dies after a reviewer's decision is claimed but before it is carried out, the same minute-by-minute pass finishes it once the claim is five minutes old (even with expiry disabled). Refunds are idempotent per approval, so a refund that had already committed is never paid twice, and a cancellation that had already committed is not repeated.
 - **Input limits.** Messages are trimmed, must be 1-2000 characters, and may not contain NUL (Postgres text cannot hold it); tool ids are bounded to the database's integer range. Bad values are a `400` at the edge instead of a failed run.
 - **Notifications carry no customer data.** Messages hold an approval id, tool, order id, refund amount, policy rule, time and the console link, never names, emails, messages or reasons. Webhook, Slack and SMTP URLs are validated at startup and never appear in logs or error messages. Webhooks are `https` only (plain `http` for localhost), are not redirected, and are HMAC-signed when `NOTIFY_WEBHOOK_SECRET` is set. This is not a full SSRF defence: the operator controls these values. Delivery is at most once (see [Reviewer notifications](#reviewer-notifications)).
@@ -313,13 +389,15 @@ This is a **starter, not a production service**. What is and isn't protected:
 - **Stream caps are per process**, so with several API replicas the effective cap is multiplied.
 - **There is no global cap on open streams.** Only the per-conversation and reviewer caps exist, and `POST /conversations` is unauthenticated (though throttled), so a client can open many conversations and hold a stream on each.
 - **Many tabs can queue requests on plain HTTP/1.1.** Each open tab holds one of a browser's ~6 connections per host for its stream, so with many tabs other requests may wait for a free one. HTTP/2 avoids this.
-- **The manual browser check is not automated.** The live-update UI (the top-bar chip, chat and console refresh, the polling fallback) has no browser test, so check it by hand after changing it.
+- **Customer login browser check.** The sign-in form, the emailed link's landing page, a chat as the signed-in customer, reload, log out and a reused link were checked by hand in Chrome against a throwaway database with the mock LLM. The "Sign out everywhere" button, the phone layout and a real mail provider were not (the API side is covered by tests).
+- **The manual browser check is not automated.** The live-update UI (the top-bar chip, chat and console refresh, the polling fallback) and the reviewer login UI have no browser test, so check them by hand after changing them. When the accounts console was built, sign-in, the live stream under the cookie, "0 of 2" to "1 of 2 approvals" with Approve disabled for the approver, and log out were checked by hand in Chrome against a throwaway database; the Reviewers tab actions, the change-password dialog and a second reviewer completing an approval in the browser were not (the API behaviour is covered by tests).
+- **An open event stream is authenticated when it opens.** If the reviewer's session ends or they are deactivated while `/events` is open, that stream keeps delivering signals until it closes (they carry only an event kind and a conversation id, no content) and the console falls back to its normal `401` handling on the next fetch.
+- **Two account details are per process.** The "any reviewers?" answer is cached in each API process (up to 5 s to notice a first reviewer created elsewhere), and the per-client request limits, including the login limit, are counted in memory. The account lockout counter is in the database, so it holds across replicas.
 - **`LISTEN` needs a session-mode Postgres connection.** A transaction-pooling proxy such as PgBouncer in transaction mode breaks it (notifications are not delivered). Point `DATABASE_URL` at Postgres directly, or at a session-mode pool.
 
 ## Next steps
 
 - Stream model tokens as they are generated (SSE currently only signals saved changes).
-- Real identity: customer login (so the customer comes from a session, not the request body), per-reviewer accounts, and four-eyes approval (see Security notes); decisions are already logged, but the log does not yet say *which* reviewer decided.
 - Run steps as a background job (queue) so long agent runs don't hold an HTTP request open.
 - Prompt-injection and eval suites; replay recorded traces against new prompts or models.
 - Per-tool rate limits and spend budgets across conversations (per-conversation token budgets exist).

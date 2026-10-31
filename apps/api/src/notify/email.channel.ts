@@ -32,18 +32,21 @@ const failure = (err: unknown): Error => {
   return new Error(typeof code === 'string' && CODE.test(code) ? `email failed (${code})` : 'email failed');
 };
 
+/** One place for the hardened SMTP transport: 5 s timeouts, STARTTLS required for remote plaintext-start hosts, no logging. */
+export function createSmtpTransport(smtpUrl: string): nodemailer.Transporter {
+  return nodemailer.createTransport({
+    url: smtpUrl,
+    connectionTimeout: TIMEOUT_MS,
+    greetingTimeout: TIMEOUT_MS,
+    socketTimeout: TIMEOUT_MS,
+    dnsTimeout: TIMEOUT_MS,
+    ...(needsStartTls(smtpUrl) ? { requireTLS: true } : {}),
+  });
+}
+
 /** Plain-text email through SMTP. No `logger` or `debug` on the transport: it would print credentials and traffic. */
 export function emailChannel({ smtpUrl, from, to, transport }: EmailOptions): Channel {
-  const transporter =
-    transport ??
-    nodemailer.createTransport({
-      url: smtpUrl,
-      connectionTimeout: TIMEOUT_MS,
-      greetingTimeout: TIMEOUT_MS,
-      socketTimeout: TIMEOUT_MS,
-      dnsTimeout: TIMEOUT_MS,
-      ...(needsStartTls(smtpUrl) ? { requireTLS: true } : {}),
-    });
+  const transporter = transport ?? createSmtpTransport(smtpUrl);
   return {
     name: 'email',
     timeoutMs: ATTEMPT_TIMEOUT_MS,
