@@ -12,6 +12,7 @@ import { StreamBus, pgListenConnection } from '../events/stream-bus';
 import { AuthController } from '../http/auth.controller';
 import { ApprovalsController } from '../http/approvals.controller';
 import { ConversationsController } from '../http/conversations.controller';
+import { CustomerAuthController } from '../http/customer-auth.controller';
 import { DomainErrorFilter } from '../http/domain-error.filter';
 import { EventsController } from '../http/events.controller';
 import { HealthController } from '../http/health.controller';
@@ -25,7 +26,7 @@ import { AgentRunner } from './runner';
 import type { ChatProvider } from './types';
 
 @Module({
-  controllers: [HealthController, ConversationsController, ApprovalsController, EventsController, AuthController, ReviewersController],
+  controllers: [HealthController, ConversationsController, ApprovalsController, EventsController, AuthController, ReviewersController, CustomerAuthController],
   providers: [
     { provide: CHAT_PROVIDER, inject: [APP_CONFIG], useFactory: (cfg: AppConfig) => createProvider(cfg) },
     {

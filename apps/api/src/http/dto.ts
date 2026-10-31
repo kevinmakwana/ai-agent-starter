@@ -97,3 +97,14 @@ export class UpdateReviewerDto {
   @IsOptional() @passwordField()
   password?: string;
 }
+
+export class RequestLinkDto {
+  @trim() @IsEmail() @MaxLength(254)
+  email!: string;
+}
+
+/** Only the type is checked here: every other problem with a token (empty, huge, unknown) is the same 401 from the service. */
+export class VerifyLinkDto {
+  @IsString()
+  token!: string;
+}
