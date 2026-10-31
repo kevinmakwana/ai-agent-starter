@@ -123,7 +123,7 @@ describe('emailChannel', () => {
 
   it('closes the transport', () => {
     const { transport, close } = fakeTransport(async () => undefined);
-    emailChannel({ ...options, transport }).close?.();
+    void emailChannel({ ...options, transport }).close?.();
     expect(close).toHaveBeenCalledTimes(1);
   });
 });

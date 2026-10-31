@@ -139,6 +139,7 @@ export class StreamBus implements OnModuleInit, BeforeApplicationShutdown, OnApp
    */
   private scheduleHeartbeat(conn: ListenConnection, lost: () => void) {
     const { intervalMs, timeoutMs } = this.opts.heartbeat ?? { intervalMs: 30_000, timeoutMs: 10_000 };
+    // eslint-disable-next-line @typescript-eslint/no-misused-promises -- every failure path inside is caught
     this.heartbeatTimer = setTimeout(async () => {
       let guard: NodeJS.Timeout | undefined;
       try {

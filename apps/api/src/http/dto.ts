@@ -2,6 +2,7 @@ import { Transform, Type } from 'class-transformer';
 import { IsBoolean, IsEmail, IsIn, IsInt, IsNotEmpty, IsOptional, IsString, IsUUID, Length, Matches, Max, MaxLength, Min } from 'class-validator';
 
 /** Postgres text and jsonb cannot hold NUL; refuse it at the edge instead of failing deep inside a run. */
+// eslint-disable-next-line no-control-regex -- matching NUL is the point
 const NO_NUL = /^[^\u0000]*$/;
 const noNul = () => Matches(NO_NUL, { message: '$property must not contain null characters' });
 const trim = () => Transform(({ value }) => (typeof value === 'string' ? value.trim() : value));

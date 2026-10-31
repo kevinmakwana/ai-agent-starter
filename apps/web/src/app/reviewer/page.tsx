@@ -100,6 +100,7 @@ export default function ReviewerConsole() {
   // that wants the detail is not downgraded by a later one that does not.
   const flight = useRef(singleFlight((skipDetail: boolean) => loadRef.current(skipDetail), (queued, next) => queued && next)).current;
   // Changing identity with the inputs is what makes the effect below refetch when the key, selection or tab changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- the extra dependencies are the point
   const refresh = useCallback((skipDetail = false) => flight(skipDetail), [flight, locked, key, me, selectedId, tab]);
 
   const stream = useEventStream(

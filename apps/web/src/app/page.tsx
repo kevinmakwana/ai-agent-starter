@@ -44,7 +44,7 @@ export default function CustomerChat() {
   const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
   useEffect(() => {
-    (async () => {
+    void (async () => {
       try {
         const h = await api.health();
         setProvider(h.provider);
@@ -102,6 +102,7 @@ export default function CustomerChat() {
   // buffers SSE never gets there and the page degrades to the old polling.
   useEffect(() => {
     if (stream === 'live') return;
+    // eslint-disable-next-line @typescript-eslint/no-misused-promises -- refresh catches its own errors
     const t = setInterval(refresh, sending ? 500 : 3000);
     return () => clearInterval(t);
   }, [refresh, sending, stream]);

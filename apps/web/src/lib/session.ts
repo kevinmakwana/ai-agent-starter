@@ -18,5 +18,8 @@ export function saveChat(chat: StoredConversation): StoredConversation[] {
 
 export const loadReviewerKey = (): string => read(globalThis.sessionStorage, REVIEWER, '');
 export function saveReviewerKey(key: string) {
-  try { key ? sessionStorage.setItem(REVIEWER, JSON.stringify(key)) : sessionStorage.removeItem(REVIEWER); } catch { /* ignore */ }
+  try {
+    if (key) sessionStorage.setItem(REVIEWER, JSON.stringify(key));
+    else sessionStorage.removeItem(REVIEWER);
+  } catch { /* ignore */ }
 }
