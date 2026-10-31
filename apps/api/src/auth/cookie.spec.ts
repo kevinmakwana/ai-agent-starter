@@ -1,5 +1,5 @@
 import { loadConfig } from '../config';
-import { readCookie, sessionCookieOptions } from './cookie';
+import { CUSTOMER_COOKIE, customerCookieOptions, readCookie, sessionCookieOptions } from './cookie';
 
 const req = (cookie?: string) => ({ headers: cookie === undefined ? {} : { cookie } });
 
@@ -33,5 +33,14 @@ describe('sessionCookieOptions', () => {
     const auth = loadConfig({ SESSION_TTL_HOURS: '2' }).auth;
     expect(sessionCookieOptions(auth)).toEqual({ httpOnly: true, sameSite: 'strict', path: '/', secure: false, maxAge: 2 * 3_600_000 });
     expect(sessionCookieOptions(loadConfig({ COOKIE_SECURE: 'true' }).auth).secure).toBe(true);
+  });
+});
+
+describe('customerCookieOptions', () => {
+  it('is HttpOnly, SameSite=Strict, site-wide, as long as the customer session, Secure on request', () => {
+    const cfg = loadConfig({ CUSTOMER_SESSION_TTL_DAYS: '3', COOKIE_SECURE: 'true' });
+    expect(customerCookieOptions(cfg)).toEqual({ httpOnly: true, sameSite: 'strict', path: '/', secure: true, maxAge: 3 * 86_400_000 });
+    expect(CUSTOMER_COOKIE).toBe('customer_session');
+    expect(customerCookieOptions(loadConfig({})).secure).toBe(false);
   });
 });

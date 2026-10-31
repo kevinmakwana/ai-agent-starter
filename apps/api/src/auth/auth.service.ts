@@ -1,5 +1,4 @@
 import { BadRequestException, Inject, Injectable, Logger, type OnApplicationBootstrap, UnauthorizedException } from '@nestjs/common';
-import { createHash, randomBytes } from 'node:crypto';
 import type { Request } from 'express';
 import type { AppConfig } from '../config';
 import { isReviewer } from '../http/reviewer.guard';
@@ -8,10 +7,11 @@ import { readCookie, SESSION_COOKIE } from './cookie';
 import * as password from './password';
 import { NONE, type Principal } from './principal';
 import type { Reviewer, ReviewerStore } from './reviewer.store';
+import { hashToken, newToken } from './session-token';
 import { REVIEWER_STORE } from './tokens';
 
 /** Only this hash is stored, so a copy of the database cannot be replayed as a cookie. */
-export const hashSessionToken = (token: string) => createHash('sha256').update(token).digest('hex');
+export const hashSessionToken = hashToken;
 
 const invalidLogin = () => new UnauthorizedException('Invalid email or password');
 
@@ -85,7 +85,7 @@ export class AuthService implements OnApplicationBootstrap {
       throw invalidLogin();
     }
     await this.store.recordLoginSuccess(found.id);
-    const token = randomBytes(32).toString('base64url');
+    const token = newToken();
     await this.store.createSession(found.id, hashSessionToken(token), this.cfg.auth.sessionTtlHours);
     await this.store.deleteExpired().catch(() => undefined); // housekeeping must never fail a login
     // an explicit list, so nothing the store happens to return (hash, counters) can reach a response
