@@ -70,6 +70,24 @@ npm install
 npm run db:up && npm run seed && npm run dev
 ```
 
+### Everything in Docker
+
+Instead of `npm install` and `npm run dev`, run the whole stack in containers (Postgres, the API and the web app):
+
+```bash
+cp .env.example .env        # optional
+docker compose up -d --build --wait
+docker compose exec api node dist/db/seed.js    # demo data (re-running it resets the demo data)
+```
+
+Open <http://localhost:3000>. The API is also published on `127.0.0.1:3001`. Create the first reviewer account with `docker compose exec -e REVIEWER_PASSWORD='a long passphrase' api node dist/cli/reviewer-add.js --email you@example.com --name "You"` (the compiled form of `npm run reviewer:add`; see [Accounts and four-eyes](#accounts-and-four-eyes)). Both images are multi-stage builds from the repo root, run as the non-root `node` user, and carry a healthcheck (`/health` for the API); the web image uses Next's `standalone` output (turned on by the build-time `NEXT_STANDALONE=1`, so `npm run dev` and `next start` are unchanged).
+
+- Compose reads the optional root `.env` for both apps, but sets `DATABASE_URL`, `API_URL` and the container ports itself, so a `.env` written for `npm run dev` (with `localhost` URLs) still works. Percent-encode `@ : / # %` in `POSTGRES_PASSWORD`, because it is placed in a URL.
+- `NODE_ENV=production` makes the session cookie `Secure`, which plain `http://localhost` cannot keep in every browser, so compose sets `COOKIE_SECURE=false` unless you override it. Set it to `true` behind HTTPS.
+- Host ports: `DB_PORT`, `API_PORT` and `WEB_PORT` (default 3000). `NODE_IMAGE` (default `node:22-alpine`) picks the base image for both builds; pin a digest there for reproducible builds.
+- `npm run db:up` still starts only the database, and `npm run db:down` stops every service.
+- **Not production-ready as shipped:** there is no TLS, no migration step beyond the idempotent DDL on boot (TODO 5.5) and a single API instance is assumed (see Known limitations). The images were built and run with the mock provider; the live LLM and mail paths were not exercised in containers.
+
 **Upgrading an existing demo database?** Builds with `track_shipment` read a `shipments` table that older seeds did not fill. Re-run `npm run seed` once, otherwise shipped and delivered orders report "not shipped" (the seed resets the demo data).
 
 Open <http://localhost:3000> (customer chat), start a chat as *Ava Brooks* and try:
@@ -295,7 +313,8 @@ One root `.env` (see [.env.example](.env.example)); everything is optional.
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | `postgres` / `postgres` / `aiagent` | Database credentials |
 | `DATABASE_URL` | built from the above | Full connection string override |
 | `API_PORT` | `3001` | NestJS port (1-65535) |
-| `API_URL` | `http://localhost:3001` | Where Next.js proxies `/api/*` |
+| `API_URL` | `http://localhost:3001` | Where Next.js proxies `/api/*` (set to `http://api:3001` by compose) |
+| `WEB_PORT` / `NODE_IMAGE` | `3000` / `node:22-alpine` | Docker only: host port of the web container, base image of both builds |
 | `REVIEWER_API_KEY` | _(unset)_ | If set (and no reviewer account exists), reviewer routes require `Authorization: Bearer <key>` and conversations require their access token; unset = open demo mode. Ignored once a reviewer account exists |
 | `AGENT_MAX_STEPS` | `8` | Max model calls per run (positive integer; invalid values stop the API at startup) |
 | `CONVERSATION_TOKEN_BUDGET` | `200000` | Max tokens (input + output) per conversation; after that the agent stops calling the model and the run ends `budget_exceeded`. A soft cap: the call that crosses it still completes |
@@ -350,7 +369,7 @@ E2E_DATABASE_URL=postgres://postgres:postgres@localhost:5432/aiagent npm test   
 - **Accounts e2e:** against real Postgres, the reviewer store (sessions, expiry, idle, lockout counters under concurrency, the last-admin lock), login/logout/cookie attributes, uniform `401`s, session end on deactivation and password change, CSRF on every mutating cookie route, the shared key being ignored once a reviewer exists, `/events` with the cookie, admin routes, no secrets in any response, and four-eyes over HTTP (one reviewer's repeat, a nine-reviewer race that must execute once, reject, deactivation, expiry, cancellations, the customer's view, audit names).
 - **Web unit:** also the proxy (forwards the cookie and `X-Requested-By`, returns every `Set-Cookie`), the CSRF header on the API client, and the approval-progress helpers.
 - **Customer login:** unit tests for the link and session lifecycle (expiry, idle, single use, keep-newest-2, hourly cap, mail failure and no leak into logs, answered before the mail is sent), the principals (a customer is not a reviewer), the principal middleware order, CSRF for customer cookies, the mail sender and the config. E2E against real Postgres: link and session store semantics (concurrent races for single use and for the hourly cap), the routes (uniform `202` and `401`, cookie attributes, CSRF, rate limit, logout and logout-all), and cross-customer access to every conversation route and stream, the open-demo and reviewer-wins cases, and login off changing nothing. Web: the fragment reader, the screen helper and the CSRF header on the customer calls.
-- CI runs typecheck, tests (with a Postgres service container) and build on every push.
+- CI runs typecheck, tests (with a Postgres service container) and build on every push, and a second job builds both Docker images (no push, no run).
 
 Regenerate the README screenshots with the stack running: `npm run screenshot` (needs `npx playwright install chromium` once).
 
