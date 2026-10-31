@@ -60,3 +60,35 @@ describe('api: accounts', () => {
     await assert.rejects(api.login('a@example.com', 'x'), (e: Error & { status?: number }) => e.message === 'Invalid email or password' && e.status === 401);
   });
 });
+
+describe('api: customer login', () => {
+  it('sends the CSRF header on every non-GET customer call and none on reads', async () => {
+    const seen = stubFetch({});
+    await api.customerRequestLink('ava@example.com');
+    await api.customerVerify('tok');
+    await api.customerLogout();
+    await api.customerLogoutAll();
+    await api.startMyConversation();
+    for (const s of seen) assert.equal(header(s.init, 'x-requested-by'), 'reviewer-console', s.url);
+    const reads = stubFetch([]);
+    await api.customerMe();
+    await api.myConversations();
+    for (const s of reads) assert.equal(header(s.init, 'x-requested-by'), undefined, s.url);
+  });
+
+  it('starts a conversation with an empty body (the customer comes from the session) and posts the right paths', async () => {
+    const seen = stubFetch({});
+    await api.startMyConversation();
+    await api.customerVerify('tok');
+    assert.equal(seen[0].url, '/api/conversations');
+    assert.deepEqual(JSON.parse(String(seen[0].init.body)), {});
+    assert.equal(seen[1].url, '/api/customer-auth/verify');
+    assert.deepEqual(JSON.parse(String(seen[1].init.body)), { token: 'tok' });
+  });
+
+  it('handles the empty 204 replies of logout', async () => {
+    globalThis.fetch = (async () => new Response(null, { status: 204 })) as typeof fetch;
+    await assert.doesNotReject(api.customerLogout());
+    await assert.doesNotReject(api.customerLogoutAll());
+  });
+});

@@ -171,3 +171,6 @@ blockquote em { display: block; color: var(--muted); margin-top: 4px; }
 .reviewer-list li { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
 .reviewer-list li.inactive { opacity: .65; }
 .add-reviewer { display: flex; flex-direction: column; gap: 8px; }
+
+/* customer login */
+.new-chat.single .btn { width: 100%; }

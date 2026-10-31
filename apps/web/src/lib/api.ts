@@ -1,4 +1,4 @@
-import type { Approval, ApprovalEvent, ConversationDetail, ConversationSummary, Customer, Reviewer } from './types';
+import type { Approval, ApprovalEvent, ConversationDetail, ConversationSummary, Customer, CustomerMe, MyConversation, Reviewer } from './types';
 
 /** `token` = conversation access token (customers); `key` = reviewer API key (console). */
 export interface Auth { token?: string; key?: string }
@@ -33,12 +33,20 @@ const post = (body: unknown): RequestInit => ({ method: 'POST', body: JSON.strin
 const patch = (body: unknown): RequestInit => ({ method: 'PATCH', body: JSON.stringify(body) });
 
 export const api = {
-  health: () => call<{ status: string; provider: string; reviewerAuth: boolean; reviewerAccounts: boolean }>('/health'),
+  health: () => call<{ status: string; provider: string; reviewerAuth: boolean; reviewerAccounts: boolean; customerLogin?: boolean }>('/health'),
   // customer
   startConversation: (who: { customerId: number } | { email: string }) =>
     call<ConversationSummary & { accessToken: string }>('/conversations', post(who)),
   conversation: (id: string, auth: Auth) => call<ConversationDetail>(`/conversations/${id}`, {}, auth),
   send: (id: string, content: string, auth: Auth) => call<unknown>(`/conversations/${id}/messages`, post({ content }), auth),
+  // customer login (cookie session; the CSRF header comes from call())
+  customerRequestLink: (email: string) => call<{ status: string }>('/customer-auth/request', post({ email })),
+  customerVerify: (token: string) => call<{ customer: CustomerMe }>('/customer-auth/verify', post({ token })),
+  customerMe: () => call<{ customer: CustomerMe }>('/customer-auth/me'),
+  customerLogout: () => call<null>('/customer-auth/logout', { method: 'POST' }),
+  customerLogoutAll: () => call<null>('/customer-auth/logout-all', { method: 'POST' }),
+  myConversations: () => call<MyConversation[]>('/my/conversations'),
+  startMyConversation: () => call<ConversationSummary>('/conversations', post({})),
   // reviewer
   customers: (auth: Auth) => call<Customer[]>('/customers', {}, auth),
   conversations: (auth: Auth) => call<ConversationSummary[]>('/conversations', {}, auth),

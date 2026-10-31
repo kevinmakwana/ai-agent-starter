@@ -73,3 +73,9 @@ export interface ApprovalEvent {
   note: string | null;
   createdAt: string;
 }
+
+/** The signed-in customer (login mode). */
+export interface CustomerMe { id: number; name: string; email: string }
+
+/** A customer's own conversation list entry (login mode): no token usage, no reviewer counts. */
+export interface MyConversation { id: string; title: string; createdAt: string; lastStatus: string | null; awaitingApproval: boolean }
