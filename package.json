@@ -23,7 +23,8 @@
     "screenshot": "node scripts/screenshot.mjs",
     "lint": "eslint apps scripts eslint.config.mjs",
     "format": "prettier --write \"apps/**/*.{ts,tsx}\" \"*.mjs\" \"scripts/*.mjs\"",
-    "format:check": "prettier --check \"apps/**/*.{ts,tsx}\" \"*.mjs\" \"scripts/*.mjs\""
+    "format:check": "prettier --check \"apps/**/*.{ts,tsx}\" \"*.mjs\" \"scripts/*.mjs\"",
+    "coverage": "npm run coverage -w apps/api && npm run coverage -w apps/web"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
