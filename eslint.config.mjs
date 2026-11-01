@@ -50,7 +50,7 @@ export default defineConfig(
     rules: { '@typescript-eslint/no-misused-promises': 'off' },
   },
   // Config files at the app roots sit outside the app tsconfigs, so they are parsed but not type-checked.
-  { files: ['apps/*/*.ts'], extends: [tseslint.configs.recommended], languageOptions: { globals: globals.node } },
+  { files: ['apps/*/*.ts', 'apps/*/e2e/**/*.ts'], extends: [tseslint.configs.recommended], languageOptions: { globals: globals.node } },
   { files: ['**/*.mjs'], languageOptions: { globals: globals.node } },
   prettier,
 );
