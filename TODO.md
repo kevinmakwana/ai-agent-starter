@@ -46,7 +46,7 @@
 ## Phase 5: Tooling and operations
 - [x] 5.1 ESLint, Prettier, `.editorconfig` and a lint step in CI.
 - [x] 5.2 Web tests (Vitest + RTL, one Playwright e2e flow) in CI.
-- [ ] 5.3 Coverage reporting in CI.
+- [x] 5.3 Coverage reporting in CI.
 - [x] 5.4 Dockerfiles for API and web; full-stack compose.
 - [ ] 5.5 Real migrations instead of DDL on boot.
 - [x] 5.6 Structured logging with request IDs; liveness/readiness split for `/health`.
