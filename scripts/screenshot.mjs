@@ -28,7 +28,10 @@ if (key) {
   await page.getByLabel('Reviewer key').fill(key);
   await page.getByRole('button', { name: 'Sign in' }).click();
 }
-await page.getByRole('button', { name: /Ava Brooks/ }).first().click();
+await page
+  .getByRole('button', { name: /Ava Brooks/ })
+  .first()
+  .click();
 await page.getByText('pending approval — run paused').waitFor({ timeout: 15000 });
 await page.waitForTimeout(500);
 await page.screenshot({ path: 'docs/screenshot.png' });
