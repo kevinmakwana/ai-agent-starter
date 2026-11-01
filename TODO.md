@@ -51,7 +51,7 @@
 - [ ] 5.5 Real migrations instead of DDL on boot.
 - [ ] 5.6 Structured logging with request IDs; liveness/readiness split for `/health`.
 - [ ] 5.7 Remove `any` in tools, provider parsing and web types.
-- [ ] 5.8 Eval suite (recorded traces, prompt-injection cases).
+- [x] 5.8 Eval suite (recorded traces, prompt-injection cases).
 
 ## Portfolio plan
 Work that only matters for presenting the project; everything else is tracked in the phases above.
