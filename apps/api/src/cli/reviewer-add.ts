@@ -4,7 +4,8 @@ import { ConflictError } from '../agent/errors';
 import { hashPassword } from '../auth/password';
 import { PgReviewerStore } from '../auth/pg-reviewer.store';
 import { loadConfig, loadRootEnv } from '../config';
-import { createPool, ensureSchema } from '../db/pool';
+import { migrate } from '../db/migrate';
+import { createPool } from '../db/pool';
 import { parseReviewerAddArgs, resolvePassword } from './reviewer-add-args';
 
 /** Reads one line from the terminal without echoing it. */
@@ -35,7 +36,7 @@ async function main() {
   const passwordHash = await hashPassword(await readPassword());
   const pool = createPool(loadConfig().databaseUrl);
   try {
-    await ensureSchema(pool);
+    await migrate(pool);
     const created = await new PgReviewerStore(pool).createReviewer({ ...args, passwordHash });
     console.log(`Created ${created.role} ${created.email} (${created.id}).`);
   } finally {

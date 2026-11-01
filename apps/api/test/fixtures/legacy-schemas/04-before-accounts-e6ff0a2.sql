@@ -1,0 +1,134 @@
+-- The schema as e6ff0a2 created it on boot (SCHEMA_SQL at that commit), kept to test upgrading a database that existed then.
+CREATE TABLE IF NOT EXISTS customers (
+  id serial PRIMARY KEY,
+  name text NOT NULL,
+  email text NOT NULL UNIQUE,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS orders (
+  id serial PRIMARY KEY,
+  customer_id int NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  status text NOT NULL CHECK (status IN ('processing', 'shipped', 'delivered', 'cancelled')),
+  total numeric(10,2) NOT NULL CHECK (total >= 0),
+  items jsonb NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS orders_customer_idx ON orders (customer_id);
+
+CREATE TABLE IF NOT EXISTS tickets (
+  id serial PRIMARY KEY,
+  customer_id int NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  subject text NOT NULL,
+  body text NOT NULL,
+  status text NOT NULL DEFAULT 'open',
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS conversations (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  customer_id int NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  title text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS access_token_hash text;
+
+CREATE TABLE IF NOT EXISTS runs (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  conversation_id uuid NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  status text NOT NULL,
+  model_calls int NOT NULL DEFAULT 0,
+  error text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  finished_at timestamptz
+);
+-- Re-created on every boot so databases made before a status was added pick it up (inline CHECKs can't be altered).
+ALTER TABLE runs DROP CONSTRAINT IF EXISTS runs_status_check;
+ALTER TABLE runs ADD CONSTRAINT runs_status_check
+  CHECK (status IN ('running', 'awaiting_approval', 'completed', 'failed', 'step_limit', 'budget_exceeded'));
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS provider text;
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS model text;
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS prompt_version text;
+CREATE INDEX IF NOT EXISTS runs_conversation_idx ON runs (conversation_id);
+
+CREATE TABLE IF NOT EXISTS steps (
+  id bigserial PRIMARY KEY,
+  run_id uuid NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+  conversation_id uuid NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  role text NOT NULL CHECK (role IN ('user', 'assistant', 'tool')),
+  content text,
+  tool_name text,
+  tool_args jsonb,
+  tool_call_id text,
+  result jsonb,
+  latency_ms int,
+  input_tokens int,
+  output_tokens int,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE steps ADD COLUMN IF NOT EXISTS cached_input_tokens int;
+CREATE INDEX IF NOT EXISTS steps_conversation_idx ON steps (conversation_id, id);
+
+CREATE TABLE IF NOT EXISTS actions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  run_id uuid NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+  conversation_id uuid NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  tool_name text NOT NULL,
+  tool_args jsonb NOT NULL,
+  tool_call_id text NOT NULL,
+  reasoning text NOT NULL DEFAULT '',
+  status text NOT NULL DEFAULT 'pending_approval' CHECK (status IN ('pending_approval', 'approved', 'rejected')),
+  decision_note text,
+  result jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  decided_at timestamptz
+);
+CREATE INDEX IF NOT EXISTS actions_status_idx ON actions (status);
+-- Set when a reviewer notification was claimed for the action (at most once), so replicas never announce it twice.
+ALTER TABLE actions ADD COLUMN IF NOT EXISTS notified_at timestamptz;
+CREATE INDEX IF NOT EXISTS actions_unnotified_idx ON actions (created_at)
+  WHERE status = 'pending_approval' AND notified_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS refunds (
+  id serial PRIMARY KEY,
+  order_id int NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  amount numeric(10,2) NOT NULL CHECK (amount > 0),
+  reason text NOT NULL,
+  action_id uuid,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS refunds_order_idx ON refunds (order_id);
+-- At most one refund per approved action, whatever the application code does.
+CREATE UNIQUE INDEX IF NOT EXISTS refunds_action_uniq ON refunds (action_id) WHERE action_id IS NOT NULL;
+
+-- Append-only: the application only ever inserts. Rows go away only with their conversation.
+CREATE TABLE IF NOT EXISTS approval_events (
+  id bigserial PRIMARY KEY,
+  kind text NOT NULL CHECK (kind IN ('requested', 'auto_approved', 'approved', 'rejected', 'expired')),
+  action_id uuid REFERENCES actions(id) ON DELETE CASCADE,
+  run_id uuid NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+  conversation_id uuid NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  actor_type text NOT NULL CHECK (actor_type IN ('reviewer', 'system', 'policy')),
+  actor_id text,
+  tool_name text NOT NULL,
+  tool_args jsonb NOT NULL,
+  rule text,
+  detail jsonb,
+  note text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS approval_events_conversation_idx ON approval_events (conversation_id, id);
+CREATE INDEX IF NOT EXISTS approval_events_action_idx ON approval_events (action_id);
+
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS cancel_action_id uuid;
+CREATE UNIQUE INDEX IF NOT EXISTS orders_cancel_action_uniq ON orders (cancel_action_id) WHERE cancel_action_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS shipments (
+  order_id int PRIMARY KEY REFERENCES orders(id) ON DELETE CASCADE,
+  carrier text NOT NULL,
+  tracking_number text NOT NULL,
+  status text NOT NULL CHECK (status IN ('label_created', 'in_transit', 'out_for_delivery', 'delivered')),
+  eta timestamptz,
+  events jsonb NOT NULL DEFAULT '[]'
+);
