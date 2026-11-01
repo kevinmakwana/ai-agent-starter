@@ -80,7 +80,7 @@ docker compose up -d --build --wait
 docker compose exec api node dist/db/seed.js    # demo data (re-running it resets the demo data)
 ```
 
-Open <http://localhost:3000>. The API is also published on `127.0.0.1:3001`. Create the first reviewer account with `docker compose exec -e REVIEWER_PASSWORD='a long passphrase' api node dist/cli/reviewer-add.js --email you@example.com --name "You"` (the compiled form of `npm run reviewer:add`; see [Accounts and four-eyes](#accounts-and-four-eyes)). Both images are multi-stage builds from the repo root, run as the non-root `node` user, and carry a healthcheck (`/health` for the API); the web image uses Next's `standalone` output (turned on by the build-time `NEXT_STANDALONE=1`, so `npm run dev` and `next start` are unchanged).
+Open <http://localhost:3000>. The API is also published on `127.0.0.1:3001`. Create the first reviewer account with `docker compose exec -e REVIEWER_PASSWORD='a long passphrase' api node dist/cli/reviewer-add.js --email you@example.com --name "You"` (the compiled form of `npm run reviewer:add`; see [Accounts and four-eyes](#accounts-and-four-eyes)). Both images are multi-stage builds from the repo root, run as the non-root `node` user, and carry a healthcheck (`/health/ready` for the API); the web image uses Next's `standalone` output (turned on by the build-time `NEXT_STANDALONE=1`, so `npm run dev` and `next start` are unchanged).
 
 - Compose reads the optional root `.env` for both apps, but sets `DATABASE_URL`, `API_URL` and the container ports itself, so a `.env` written for `npm run dev` (with `localhost` URLs) still works. Percent-encode `@ : / # %` in `POSTGRES_PASSWORD`, because it is placed in a URL.
 - `NODE_ENV=production` makes the session cookie `Secure`, which plain `http://localhost` cannot keep in every browser, so compose sets `COOKIE_SECURE=false` unless you override it. Set it to `true` behind HTTPS.
@@ -137,7 +137,8 @@ It asks "What did I order in order #1, and has any of it been refunded?", valida
 | `GET /customers` | 🔒 Customers for the demo picker (extra) |
 | `POST /customer-auth/request` · `POST /customer-auth/verify` · `POST /customer-auth/logout` · `POST /customer-auth/logout-all` · `GET /customer-auth/me` | Customer login (`CUSTOMER_LOGIN=true`, otherwise `404`): ask for a link by `{ email }` (always `202`), redeem it with `{ token }` (sets the cookie), sign out, sign out everywhere, who am I. See [Customer login](#customer-login) |
 | `GET /my/conversations` | 🍪 A signed-in customer's own conversations (login mode) |
-| `GET /health` | API + database + active provider, `reviewerAuth` (a key or accounts are required) and `reviewerAccounts` (at least one reviewer exists) and `customerLogin` |
+| `GET /health` | API + database + active provider, `reviewerAuth` (a key or accounts are required) and `reviewerAccounts` (at least one reviewer exists) and `customerLogin` (`503` while the database is down) |
+| `GET /health/live` · `GET /health/ready` | Liveness (the process answers; never touches the database, so a database outage does not get the process restarted) and readiness (`SELECT 1`; `503` `{ status: 'error', db: 'down' }` while it fails). Neither is rate limited or access-logged. The Docker image's healthcheck uses `/health/ready` |
 
 🔒 = a reviewer: the session cookie once reviewer accounts exist, otherwise the shared key (`Authorization: Bearer <REVIEWER_API_KEY>`). 🔑 = the conversation's `X-Conversation-Token`, or a reviewer. 🛡 = a reviewer with the `admin` role (a signed-in person: the shared key and demo mode have no identity and get `403`). 🍪 = a signed-in customer (the `customer_session` cookie). In login mode 🔑 means that customer's session (or a reviewer) instead of the token. Both 🔒 and 🔑 are open when no reviewer exists and `REVIEWER_API_KEY` is unset (demo mode).
 
@@ -303,6 +304,12 @@ Each attempt has a 5 s timeout (20 s for email); anything but a 2xx response, or
 
 Test coverage: the channels are covered by unit tests with fakes (the email channel through nodemailer's JSON transport, the others with a fake `fetch`), and the webhook additionally by an end-to-end test against Postgres and a local receiver. They have **not** been exercised against a real Slack workspace or SMTP server, so try yours with a test approval (see the quick start) before relying on it.
 
+## Logging
+
+Every request gets an id: a well-formed `X-Request-Id` from the caller is kept (8-64 characters of `A-Za-z0-9._-`), anything else is replaced by a UUID, and it is returned in the `X-Request-Id` response header. The Next.js proxy forwards it (or makes one), so a browser request, the API's access line and any log written while serving it share one id. Each finished request writes one `Http` line: method, path **without the query string**, status and duration; never headers, cookies or bodies. Health probes are not logged.
+
+`LOG_FORMAT=json` writes one JSON object per line (`time`, `level`, `context`, `requestId`, `msg`, extra fields, `stack` for errors; errors go to stderr, the rest to stdout), `pretty` a readable line. The default is `json` when `NODE_ENV=production` (the Docker images) and `pretty` otherwise. Keys that look like credentials (authorization, cookie, password, secret, token, api key) are replaced by `[redacted]` in logged objects, and messages are capped at 2000 characters; JSON escaping stops a message with newlines from forging a second record. Work that runs outside a request (the approval-expiry sweep, notifications, the live-update listener) logs without a request id. This is a logger, not a tracing system: there are no spans, no metrics and no log shipping.
+
 ## Configuration
 
 One root `.env` (see [.env.example](.env.example)); everything is optional.
@@ -313,6 +320,7 @@ One root `.env` (see [.env.example](.env.example)); everything is optional.
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | `postgres` / `postgres` / `aiagent` | Database credentials |
 | `DATABASE_URL` | built from the above | Full connection string override |
 | `API_PORT` | `3001` | NestJS port (1-65535) |
+| `LOG_FORMAT` | `json` in production, else `pretty` | `json` or `pretty` (anything else stops the API at startup) |
 | `API_URL` | `http://localhost:3001` | Where Next.js proxies `/api/*` (set to `http://api:3001` by compose) |
 | `WEB_PORT` / `NODE_IMAGE` | `3000` / `node:22-alpine` | Docker only: host port of the web container, base image of both builds |
 | `REVIEWER_API_KEY` | _(unset)_ | If set (and no reviewer account exists), reviewer routes require `Authorization: Bearer <key>` and conversations require their access token; unset = open demo mode. Ignored once a reviewer account exists |

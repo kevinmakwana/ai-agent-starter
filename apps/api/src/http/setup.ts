@@ -2,11 +2,13 @@ import { type INestApplication, ValidationPipe } from '@nestjs/common';
 import helmet from 'helmet';
 import type { AppConfig } from '../config';
 import { APP_CONFIG } from '../tokens';
+import { requestId } from './request-id.middleware';
 
 /** Shared by main.ts and the e2e suite so both run with identical validation, headers, CORS and proxy rules. */
 export function configureApp(app: INestApplication): void {
   const cfg = app.get<AppConfig>(APP_CONFIG);
 
+  app.use(requestId);
   app.use(helmet());
   // Browsers reach the API through the same-origin Next.js proxy, so CORS stays off unless origins are listed.
   if (cfg.corsOrigins.length) {

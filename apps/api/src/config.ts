@@ -72,6 +72,13 @@ export const loadRateLimits = (env: NodeJS.ProcessEnv = process.env): RateLimits
 });
 
 /** Exact origins only (no wildcards): browsers may call the API cross-origin from these and nowhere else. */
+function parseLogFormat(env: NodeJS.ProcessEnv): 'json' | 'pretty' {
+  const raw = env.LOG_FORMAT?.trim();
+  if (!raw) return env.NODE_ENV === 'production' ? 'json' : 'pretty';
+  if (raw !== 'json' && raw !== 'pretty') throw new Error(`LOG_FORMAT must be json or pretty (got "${raw}")`);
+  return raw;
+}
+
 function parseCorsOrigins(raw = ''): string[] {
   return raw
     .split(',')
@@ -160,6 +167,8 @@ export interface AppConfig {
   /** Proxy hops whose X-Forwarded-For is trusted for client identity; false = use the socket address. */
   trustProxy: number | false;
   rateLimit: RateLimits;
+  /** `json` (one JSON object per line, for log collectors) or `pretty` (readable). Default: json in production, pretty otherwise. */
+  logFormat: 'json' | 'pretty';
   /** Caps on concurrent server-sent-event streams; over the cap answers 429. */
   streams: StreamLimits;
   /** Max tokens (input + output) per conversation before the agent stops calling the model. */
@@ -202,6 +211,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     corsOrigins: parseCorsOrigins(env.CORS_ORIGINS),
     trustProxy: parseTrustProxy(env.TRUST_PROXY),
     rateLimit: loadRateLimits(env),
+    logFormat: parseLogFormat(env),
     streams: {
       perConversation: positiveInt(env, 'STREAM_MAX_PER_CONVERSATION', 5),
       reviewer: positiveInt(env, 'STREAM_MAX_REVIEWER', 20),

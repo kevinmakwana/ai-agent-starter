@@ -210,3 +210,17 @@ describe('customer login config', () => {
     expect(() => loadConfig({ RATE_LIMIT_CUSTOMER_LOGIN_PER_MINUTE: 'x' })).toThrow('RATE_LIMIT_CUSTOMER_LOGIN_PER_MINUTE');
   });
 });
+
+describe('log format config', () => {
+  it('defaults to json in production and pretty elsewhere', () => {
+    expect(loadConfig({ NODE_ENV: 'production' }).logFormat).toBe('json');
+    expect(loadConfig({}).logFormat).toBe('pretty');
+    expect(loadConfig({ NODE_ENV: 'development' }).logFormat).toBe('pretty');
+  });
+
+  it('lets LOG_FORMAT decide, and rejects anything else', () => {
+    expect(loadConfig({ NODE_ENV: 'production', LOG_FORMAT: 'pretty' }).logFormat).toBe('pretty');
+    expect(loadConfig({ LOG_FORMAT: ' json ' }).logFormat).toBe('json');
+    expect(() => loadConfig({ LOG_FORMAT: 'xml' })).toThrow('LOG_FORMAT');
+  });
+});
