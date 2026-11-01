@@ -9,11 +9,17 @@ export class DomainErrorFilter implements ExceptionFilter {
 
   catch(err: Error, host: ArgumentsHost) {
     const [statusCode, error] =
-      err instanceof NotFoundError ? [HttpStatus.NOT_FOUND, 'Not Found']
-      : err instanceof ConflictError ? [HttpStatus.CONFLICT, 'Conflict']
-      : [HttpStatus.BAD_GATEWAY, 'Bad Gateway'];
+      err instanceof NotFoundError
+        ? [HttpStatus.NOT_FOUND, 'Not Found']
+        : err instanceof ConflictError
+          ? [HttpStatus.CONFLICT, 'Conflict']
+          : [HttpStatus.BAD_GATEWAY, 'Bad Gateway'];
     if (err instanceof UpstreamLlmError && err.detail) this.logger.error(`${err.message} :: ${err.detail}`);
     const code = err instanceof ConflictError ? err.code : undefined;
-    host.switchToHttp().getResponse<Response>().status(statusCode).json({ statusCode, error, message: err.message, ...(code && { code }) });
+    host
+      .switchToHttp()
+      .getResponse<Response>()
+      .status(statusCode)
+      .json({ statusCode, error, message: err.message, ...(code && { code }) });
   }
 }

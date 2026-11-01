@@ -6,10 +6,7 @@ const toCents = (amount: number) => Math.round(amount * 100);
 /** Tools may only touch the customer the conversation is bound to. */
 export function assertSameCustomer(boundCustomerId: number, targetCustomerId: number, what: string): void {
   if (boundCustomerId !== targetCustomerId) {
-    throw new GuardrailViolation(
-      'CROSS_CUSTOMER',
-      `Access denied: ${what} does not belong to the customer in this conversation.`,
-    );
+    throw new GuardrailViolation('CROSS_CUSTOMER', `Access denied: ${what} does not belong to the customer in this conversation.`);
   }
 }
 
@@ -57,5 +54,4 @@ export function assertCancellable({ status, priorRefunded }: CancelCheck): void 
   }
 }
 
-export const refundable = (orderTotal: number, priorRefunded: number) =>
-  Math.max(0, (toCents(orderTotal) - toCents(priorRefunded)) / 100);
+export const refundable = (orderTotal: number, priorRefunded: number) => Math.max(0, (toCents(orderTotal) - toCents(priorRefunded)) / 100);

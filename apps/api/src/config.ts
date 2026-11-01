@@ -73,12 +73,20 @@ export const loadRateLimits = (env: NodeJS.ProcessEnv = process.env): RateLimits
 
 /** Exact origins only (no wildcards): browsers may call the API cross-origin from these and nowhere else. */
 function parseCorsOrigins(raw = ''): string[] {
-  return raw.split(',').map((o) => o.trim()).filter(Boolean).map((o) => {
-    let origin: string | null = null;
-    try { origin = new URL(o).origin; } catch { /* handled below */ }
-    if (origin !== o) throw new Error(`CORS_ORIGINS entries must be exact origins like https://app.example.com (got "${o}")`);
-    return o;
-  });
+  return raw
+    .split(',')
+    .map((o) => o.trim())
+    .filter(Boolean)
+    .map((o) => {
+      let origin: string | null = null;
+      try {
+        origin = new URL(o).origin;
+      } catch {
+        /* handled below */
+      }
+      if (origin !== o) throw new Error(`CORS_ORIGINS entries must be exact origins like https://app.example.com (got "${o}")`);
+      return o;
+    });
 }
 
 /** Number of reverse-proxy hops to trust for X-Forwarded-For (0/unset = trust none). */
@@ -121,7 +129,8 @@ export interface CustomerLoginConfig {
 }
 
 /** Read on its own like the other limits, because route decorators resolve it per request. */
-export const loadCustomerLoginLimit = (env: NodeJS.ProcessEnv = process.env): number => positiveInt(env, 'RATE_LIMIT_CUSTOMER_LOGIN_PER_MINUTE', 5);
+export const loadCustomerLoginLimit = (env: NodeJS.ProcessEnv = process.env): number =>
+  positiveInt(env, 'RATE_LIMIT_CUSTOMER_LOGIN_PER_MINUTE', 5);
 
 function loadCustomerLogin(env: NodeJS.ProcessEnv): CustomerLoginConfig {
   const enabled = booleanFlag(env, 'CUSTOMER_LOGIN', false);

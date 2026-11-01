@@ -44,7 +44,7 @@
 - [x] 4.6 More tools: `cancel_order` (risky), `track_shipment`.
 
 ## Phase 5: Tooling and operations
-- [ ] 5.1 ESLint, Prettier, `.editorconfig` and a lint step in CI.
+- [x] 5.1 ESLint, Prettier, `.editorconfig` and a lint step in CI.
 - [ ] 5.2 Web tests (Vitest + RTL, one Playwright e2e flow) in CI.
 - [ ] 5.3 Coverage reporting in CI.
 - [x] 5.4 Dockerfiles for API and web; full-stack compose.

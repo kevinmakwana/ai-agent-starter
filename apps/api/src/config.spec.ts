@@ -3,7 +3,7 @@ import { loadConfig, loadRateLimits } from './config';
 describe('loadConfig', () => {
   it('runs with zero configuration (offline mock provider)', () => {
     const cfg = loadConfig({});
-    expect(cfg).toMatchObject({ provider: "mock", port: 3001, maxSteps: 8, reviewerApiKey: "" });
+    expect(cfg).toMatchObject({ provider: 'mock', port: 3001, maxSteps: 8, reviewerApiKey: '' });
     expect(cfg.databaseUrl).toBe('postgres://postgres:postgres@localhost:5432/aiagent');
   });
 
@@ -85,7 +85,11 @@ describe('HTTP hardening config', () => {
 
 describe('basic numeric config', () => {
   it('validates the step limit, port and mock delay instead of letting NaN through', () => {
-    expect(loadConfig({ AGENT_MAX_STEPS: '5', API_PORT: '4000', MOCK_DELAY_MS: '0' })).toMatchObject({ maxSteps: 5, port: 4000, mockDelayMs: 0 });
+    expect(loadConfig({ AGENT_MAX_STEPS: '5', API_PORT: '4000', MOCK_DELAY_MS: '0' })).toMatchObject({
+      maxSteps: 5,
+      port: 4000,
+      mockDelayMs: 0,
+    });
     expect(() => loadConfig({ AGENT_MAX_STEPS: 'many' })).toThrow('AGENT_MAX_STEPS');
     expect(() => loadConfig({ AGENT_MAX_STEPS: '0' })).toThrow('AGENT_MAX_STEPS');
     expect(() => loadConfig({ API_PORT: 'http' })).toThrow('API_PORT');
@@ -117,7 +121,9 @@ describe('stream limits config', () => {
 
 describe('account and four-eyes config', () => {
   const restoreEnv = process.env.NODE_ENV;
-  afterEach(() => { process.env.NODE_ENV = restoreEnv; });
+  afterEach(() => {
+    process.env.NODE_ENV = restoreEnv;
+  });
 
   it('defaults', () => {
     const cfg = loadConfig({});
@@ -133,7 +139,10 @@ describe('account and four-eyes config', () => {
   });
 
   it('validates the numeric settings', () => {
-    expect(loadConfig({ SESSION_TTL_HOURS: '1', RATE_LIMIT_LOGIN_PER_MINUTE: '3' }).auth).toMatchObject({ sessionTtlHours: 1, loginPerMinute: 3 });
+    expect(loadConfig({ SESSION_TTL_HOURS: '1', RATE_LIMIT_LOGIN_PER_MINUTE: '3' }).auth).toMatchObject({
+      sessionTtlHours: 1,
+      loginPerMinute: 3,
+    });
     expect(() => loadConfig({ SESSION_TTL_HOURS: '0' })).toThrow('SESSION_TTL_HOURS');
     expect(() => loadConfig({ SESSION_TTL_HOURS: '1.5' })).toThrow('SESSION_TTL_HOURS');
     expect(() => loadConfig({ RATE_LIMIT_LOGIN_PER_MINUTE: 'x' })).toThrow('RATE_LIMIT_LOGIN_PER_MINUTE');
@@ -159,13 +168,17 @@ describe('customer login config', () => {
 
   it('is off by default and needs nothing', () => {
     expect(loadConfig({}).customerLogin).toEqual({
-      enabled: false, appUrl: 'http://localhost:3000', sessionTtlDays: 7, requestPerMinute: 5,
+      enabled: false,
+      appUrl: 'http://localhost:3000',
+      sessionTtlDays: 7,
+      requestPerMinute: 5,
     });
   });
 
   it('turns on only with true, and needs the mail settings', () => {
     expect(loadConfig({ CUSTOMER_LOGIN: 'true', ...mail }).customerLogin).toMatchObject({
-      enabled: true, mail: { smtpUrl: mail.LOGIN_SMTP_URL, from: 'support@example.com' },
+      enabled: true,
+      mail: { smtpUrl: mail.LOGIN_SMTP_URL, from: 'support@example.com' },
     });
     expect(() => loadConfig({ CUSTOMER_LOGIN: 'true' })).toThrow('LOGIN_SMTP_URL');
     expect(() => loadConfig({ CUSTOMER_LOGIN: 'true', LOGIN_SMTP_URL: mail.LOGIN_SMTP_URL })).toThrow('together');
@@ -176,7 +189,11 @@ describe('customer login config', () => {
     expect(() => loadConfig({ LOGIN_EMAIL_FROM: 'support@example.com' })).toThrow('together');
     expect(() => loadConfig({ LOGIN_SMTP_URL: 'http://smtp.example.com', LOGIN_EMAIL_FROM: 'a@example.com' })).toThrow('LOGIN_SMTP_URL');
     let message = '';
-    try { loadConfig({ LOGIN_SMTP_URL: 'ftp://user:secretpw@host', LOGIN_EMAIL_FROM: 'a@example.com' }); } catch (e) { message = (e as Error).message; }
+    try {
+      loadConfig({ LOGIN_SMTP_URL: 'ftp://user:secretpw@host', LOGIN_EMAIL_FROM: 'a@example.com' });
+    } catch (e) {
+      message = (e as Error).message;
+    }
     expect(message).toContain('LOGIN_SMTP_URL');
     expect(message).not.toContain('secretpw');
     expect(() => loadConfig({ LOGIN_SMTP_URL: mail.LOGIN_SMTP_URL, LOGIN_EMAIL_FROM: 'not an address' })).toThrow('LOGIN_EMAIL_FROM');
@@ -185,8 +202,10 @@ describe('customer login config', () => {
   it('trims the app url, validates numbers', () => {
     expect(loadConfig({ CUSTOMER_APP_URL: 'https://shop.example.com/' }).customerLogin.appUrl).toBe('https://shop.example.com');
     expect(() => loadConfig({ CUSTOMER_APP_URL: 'javascript:alert(1)' })).toThrow('CUSTOMER_APP_URL');
-    expect(loadConfig({ CUSTOMER_SESSION_TTL_DAYS: '30', RATE_LIMIT_CUSTOMER_LOGIN_PER_MINUTE: '2' }).customerLogin)
-      .toMatchObject({ sessionTtlDays: 30, requestPerMinute: 2 });
+    expect(loadConfig({ CUSTOMER_SESSION_TTL_DAYS: '30', RATE_LIMIT_CUSTOMER_LOGIN_PER_MINUTE: '2' }).customerLogin).toMatchObject({
+      sessionTtlDays: 30,
+      requestPerMinute: 2,
+    });
     expect(() => loadConfig({ CUSTOMER_SESSION_TTL_DAYS: '0' })).toThrow('CUSTOMER_SESSION_TTL_DAYS');
     expect(() => loadConfig({ RATE_LIMIT_CUSTOMER_LOGIN_PER_MINUTE: 'x' })).toThrow('RATE_LIMIT_CUSTOMER_LOGIN_PER_MINUTE');
   });

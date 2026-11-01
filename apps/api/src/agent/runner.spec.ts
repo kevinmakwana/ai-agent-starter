@@ -64,7 +64,9 @@ describe('agent loop with the mock provider', () => {
     const [action] = [...store.actions.values()];
 
     const createRefund = shop.createRefund.bind(shop);
-    shop.createRefund = async () => { throw new Error('db down'); };
+    shop.createRefund = async () => {
+      throw new Error('db down');
+    };
     await expect(runner.decide(action.id, 'approve')).rejects.toThrow('db down');
 
     // nothing half-done: still pending, no tool result recorded, run still paused
@@ -121,7 +123,8 @@ describe('mock provider: cancel and track flows', () => {
     expect(toolSteps(store)).toEqual(['assistant:get_order', 'tool:get_order', 'assistant:cancel_order']);
     const [action] = [...store.actions.values()];
     expect(action).toMatchObject({
-      toolName: 'cancel_order', status: 'pending_approval',
+      toolName: 'cancel_order',
+      status: 'pending_approval',
       toolArgs: { orderId: 10, reason: 'Cancel order #10, I ordered it by mistake' },
     });
     expect(action.reasoning).toContain('reviewed');
@@ -264,7 +267,13 @@ describe('agent loop safety', () => {
   it('refuses a second message while a run is still in flight, then accepts one after it finishes', async () => {
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));
-    const slow: ChatProvider = { name: 'slow', complete: async () => { await gate; return { text: 'done', toolCalls: [] }; } };
+    const slow: ChatProvider = {
+      name: 'slow',
+      complete: async () => {
+        await gate;
+        return { text: 'done', toolCalls: [] };
+      },
+    };
     const { runner, store, conv } = setup(slow);
 
     const first = runner.handleUserMessage(conv, 'first');
@@ -288,7 +297,12 @@ describe('agent loop safety', () => {
   it('rejects unknown tools and invalid args as tool results', async () => {
     const { runner, store, conv } = setup(
       scripted([
-        { toolCalls: [{ id: 'a', name: 'delete_everything', args: {} }, { id: 'b', name: 'get_order', args: { orderId: 'one' } }] },
+        {
+          toolCalls: [
+            { id: 'a', name: 'delete_everything', args: {} },
+            { id: 'b', name: 'get_order', args: { orderId: 'one' } },
+          ],
+        },
         { text: 'done', toolCalls: [] },
       ]),
     );
@@ -317,7 +331,12 @@ describe('agent loop safety', () => {
   });
 
   it('marks the run failed and rethrows when the provider errors', async () => {
-    const broken: ChatProvider = { name: 'broken', complete: async () => { throw new Error('boom'); } };
+    const broken: ChatProvider = {
+      name: 'broken',
+      complete: async () => {
+        throw new Error('boom');
+      },
+    };
     const { runner, store, conv } = setup(broken);
     await expect(runner.handleUserMessage(conv, 'hi')).rejects.toThrow('boom');
     expect([...store.runs.values()][0]).toMatchObject({ status: 'failed', error: 'boom' });
@@ -326,7 +345,15 @@ describe('agent loop safety', () => {
   it('parks only the first risky call in a batch and skips the rest', async () => {
     const refund = { name: 'issue_refund', args: { orderId: 1, amount: 5, reason: 'damaged item' } };
     const { runner, store, conv } = setup(
-      scripted([{ toolCalls: [{ id: 'r1', ...refund }, { id: 'r2', ...refund }] }, { text: 'ok', toolCalls: [] }]),
+      scripted([
+        {
+          toolCalls: [
+            { id: 'r1', ...refund },
+            { id: 'r2', ...refund },
+          ],
+        },
+        { text: 'ok', toolCalls: [] },
+      ]),
     );
     expect((await runner.handleUserMessage(conv, 'x')).status).toBe('awaiting_approval');
     expect(store.actions.size).toBe(1);
@@ -342,7 +369,10 @@ describe('token budget', () => {
       name: 'costly',
       complete: async () => {
         counter.calls++;
-        return { toolCalls: [{ id: `c${counter.calls}`, name: 'get_order', args: { orderId: 1 } }], usage: { inputTokens: 60, outputTokens: 40 } };
+        return {
+          toolCalls: [{ id: `c${counter.calls}`, name: 'get_order', args: { orderId: 1 } }],
+          usage: { inputTokens: 60, outputTokens: 40 },
+        };
       },
     };
     return { counter, provider };
@@ -355,7 +385,9 @@ describe('token budget', () => {
     expect(run).toMatchObject({ status: 'budget_exceeded', modelCalls: 3 }); // 100, 200, 300 >= 250: no 4th call
     expect(counter.calls).toBe(3);
     expect(store.steps.at(-1)).toMatchObject({
-      role: 'assistant', content: expect.stringContaining('usage limit'), result: { code: 'TOKEN_BUDGET' },
+      role: 'assistant',
+      content: expect.stringContaining('usage limit'),
+      result: { code: 'TOKEN_BUDGET' },
     });
   });
 
@@ -382,7 +414,8 @@ describe('token budget', () => {
 
   it('records how many prompt tokens the provider served from its cache', async () => {
     const cached: ChatProvider = {
-      name: 'cached', complete: async () => ({ text: 'hi', toolCalls: [], usage: { inputTokens: 100, outputTokens: 5, cachedInputTokens: 80 } }),
+      name: 'cached',
+      complete: async () => ({ text: 'hi', toolCalls: [], usage: { inputTokens: 100, outputTokens: 5, cachedInputTokens: 80 } }),
     };
     const { runner, store, conv } = setup(cached);
     await runner.handleUserMessage(conv, 'hello');
@@ -408,7 +441,10 @@ describe('token budget', () => {
   });
 
   it('counts the usage of an empty reply that was refused, so it cannot be used to dodge the budget', async () => {
-    const empty: ChatProvider = { name: 'empty', complete: async () => ({ text: '', toolCalls: [], usage: { inputTokens: 100, outputTokens: 0 } }) };
+    const empty: ChatProvider = {
+      name: 'empty',
+      complete: async () => ({ text: '', toolCalls: [], usage: { inputTokens: 100, outputTokens: 0 } }),
+    };
     const { runner, store, conv } = setup(empty, 8, 150);
     await runner.handleUserMessage(conv, 'a').catch(() => undefined);
     await runner.handleUserMessage(conv, 'b').catch(() => undefined);
@@ -444,7 +480,13 @@ describe('conversation context', () => {
 
   it('sends the provider only the newest turns that fit, while the stored trace stays complete', async () => {
     const seen: ChatMessage[][] = [];
-    const recorder: ChatProvider = { name: 'rec', complete: async (messages) => { seen.push(messages); return { text: 'ok', toolCalls: [] }; } };
+    const recorder: ChatProvider = {
+      name: 'rec',
+      complete: async (messages) => {
+        seen.push(messages);
+        return { text: 'ok', toolCalls: [] };
+      },
+    };
     const { runner, store, conv } = setup(recorder, 8, undefined, 2500);
     const long = (label: string) => `${label} ${'x'.repeat(4000)}`;
     for (const label of ['one', 'two', 'three']) await runner.handleUserMessage(conv, long(label));
@@ -460,7 +502,9 @@ describe('failures around a run', () => {
   it('does not leave the conversation blocked when the first user message cannot be saved', async () => {
     const { runner, store, conv } = setup();
     const addStep = store.addStep.bind(store);
-    store.addStep = async () => { throw new Error('db down'); };
+    store.addStep = async () => {
+      throw new Error('db down');
+    };
     await expect(runner.handleUserMessage(conv, 'hi')).rejects.toThrow('db down');
     expect([...store.runs.values()][0]).toMatchObject({ status: 'failed', error: 'db down' });
 
@@ -489,7 +533,9 @@ describe('failures around a run', () => {
     it('reopens it if saving the result fails, so the reviewer can retry (the refund is idempotent per approval)', async () => {
       const { runner, store, action } = await park();
       const setActionResult = store.setActionResult.bind(store);
-      store.setActionResult = async () => { throw new Error('db down'); };
+      store.setActionResult = async () => {
+        throw new Error('db down');
+      };
       await expect(runner.decide(action.id, 'approve')).rejects.toThrow('db down');
       expect(store.actions.get(action.id)).toMatchObject({ status: 'pending_approval', result: null });
       expect([...store.runs.values()][0].status).toBe('awaiting_approval');
@@ -501,7 +547,10 @@ describe('failures around a run', () => {
     it('fails the run, rather than leaving it parked forever, once the result is saved but the trace cannot be', async () => {
       const { runner, store, action, conv } = await park();
       const addStep = store.addStep.bind(store);
-      store.addStep = async (s) => { if (s.role === 'tool' && s.toolName === 'issue_refund') throw new Error('db down'); return addStep(s); };
+      store.addStep = async (s) => {
+        if (s.role === 'tool' && s.toolName === 'issue_refund') throw new Error('db down');
+        return addStep(s);
+      };
       await expect(runner.decide(action.id, 'approve')).rejects.toThrow('db down');
       expect(store.actions.get(action.id)?.result).not.toBeNull(); // the decision stands; it is not re-executed
       expect([...store.runs.values()][0].status).toBe('failed');
@@ -515,7 +564,12 @@ describe('failures around a run', () => {
       const run = await store.createRun(conv.id);
       await store.updateRun(run.id, { status: 'awaiting_approval' });
       const action = await store.createAction({
-        runId: run.id, conversationId: conv.id, toolName: 'retired_tool', toolArgs: {}, toolCallId: 't1', reasoning: '',
+        runId: run.id,
+        conversationId: conv.id,
+        toolName: 'retired_tool',
+        toolArgs: {},
+        toolCallId: 't1',
+        reasoning: '',
       });
       const out = await runner.decide(action.id, 'approve');
       expect(out.action.result).toMatchObject({ code: 'UNKNOWN_TOOL' });
@@ -529,10 +583,11 @@ describe('tool arguments the database cannot store', () => {
     let i = 0;
     const provider: ChatProvider = {
       name: 'scripted',
-      complete: async () => [
-        { toolCalls: [{ id: 'a', name: 'create_ticket', args: { subject: 'Late parcel', body: 'bad \u0000 byte' } }] },
-        { text: 'done', toolCalls: [] },
-      ][i++],
+      complete: async () =>
+        [
+          { toolCalls: [{ id: 'a', name: 'create_ticket', args: { subject: 'Late parcel', body: 'bad \u0000 byte' } }] },
+          { text: 'done', toolCalls: [] },
+        ][i++],
     };
     const { runner, store, conv, shop } = setup(provider);
     expect((await runner.handleUserMessage(conv, 'open a ticket')).status).toBe('completed');
@@ -559,8 +614,13 @@ describe('approval policy', () => {
     expect(store.steps.at(-1)?.content).toContain('approved and issued');
     expect(store.events).toEqual([
       expect.objectContaining({
-        kind: 'auto_approved', actorType: 'policy', actionId: null, toolName: 'issue_refund', toolArgs: expect.objectContaining({ orderId: 1, amount: 50 }),
-        rule: 'under_threshold', detail: { threshold: 100, priorRefunded: 0, amount: 50 },
+        kind: 'auto_approved',
+        actorType: 'policy',
+        actionId: null,
+        toolName: 'issue_refund',
+        toolArgs: expect.objectContaining({ orderId: 1, amount: 50 }),
+        rule: 'under_threshold',
+        detail: { threshold: 100, priorRefunded: 0, amount: 50 },
       }),
     ]);
   });
@@ -572,7 +632,12 @@ describe('approval policy', () => {
     expect(run.status).toBe('awaiting_approval');
     expect(shop.refunds).toHaveLength(0);
     expect(store.events).toEqual([
-      expect.objectContaining({ kind: 'requested', actorType: 'policy', rule: 'over_threshold', detail: { threshold: 50, priorRefunded: 0, amount: 50 } }),
+      expect.objectContaining({
+        kind: 'requested',
+        actorType: 'policy',
+        rule: 'over_threshold',
+        detail: { threshold: 50, priorRefunded: 0, amount: 50 },
+      }),
     ]);
   });
 
@@ -610,7 +675,9 @@ describe('approval policy', () => {
 
   it('does not refund, and fails the run, when the audit event cannot be written', async () => {
     const { runner, store, shop, newConversation } = build(100);
-    store.addApprovalEvent = async () => { throw new Error('audit down'); };
+    store.addApprovalEvent = async () => {
+      throw new Error('audit down');
+    };
 
     await expect(runner.handleUserMessage(newConversation(), 'refund order #1')).rejects.toThrow('audit down');
     expect(shop.refunds).toHaveLength(0);
@@ -627,8 +694,9 @@ describe('approval policy', () => {
     const crossConv = newConversation();
     const cross = await runner.handleUserMessage(crossConv, 'refund order #2'); // belongs to customer 2
     expect(cross.status).toBe('completed');
-    expect(store.steps.find((s) => s.role === 'tool' && s.toolName === 'get_order' && s.conversationId === crossConv.id)?.result)
-      .toMatchObject({ code: 'CROSS_CUSTOMER' });
+    expect(
+      store.steps.find((s) => s.role === 'tool' && s.toolName === 'get_order' && s.conversationId === crossConv.id)?.result,
+    ).toMatchObject({ code: 'CROSS_CUSTOMER' });
 
     expect(shop.refunds).toHaveLength(0);
     expect(store.events).toEqual([]); // nothing was decided, so nothing is logged
@@ -682,10 +750,11 @@ describe('approval policy with scripted model calls', () => {
 });
 
 describe('cancel_order approval flow', () => {
-  const cancel = (orderId: number) => scripted([
-    { toolCalls: [{ id: 'c1', name: 'cancel_order', args: { orderId, reason: 'changed my mind' } }] },
-    { text: 'done', toolCalls: [] },
-  ]);
+  const cancel = (orderId: number) =>
+    scripted([
+      { toolCalls: [{ id: 'c1', name: 'cancel_order', args: { orderId, reason: 'changed my mind' } }] },
+      { text: 'done', toolCalls: [] },
+    ]);
   const build = (provider: ChatProvider, approvalPolicy?: { refundAutoApproveUnder: number }) => {
     const shop = new MemoryShop();
     shop.orders.push({ id: 10, customerId: 1, status: 'processing', total: 30, items: [], createdAt: '2026-01-05T00:00:00.000Z' });
@@ -713,7 +782,10 @@ describe('cancel_order approval flow', () => {
 
     expect(await status(shop)).toBe('cancelled');
     expect(run.status).toBe('completed');
-    expect(store.steps.find((s) => s.role === 'tool' && s.toolName === 'cancel_order')?.result).toEqual({ orderId: 10, status: 'cancelled' });
+    expect(store.steps.find((s) => s.role === 'tool' && s.toolName === 'cancel_order')?.result).toEqual({
+      orderId: 10,
+      status: 'cancelled',
+    });
     expect(shop.cancelActions.get(10)).toBe(action.id); // the approval's id reached execute
   });
 
@@ -725,7 +797,8 @@ describe('cancel_order approval flow', () => {
 
     expect(await status(shop)).toBe('processing');
     expect(store.steps.find((s) => s.role === 'tool' && s.toolName === 'cancel_order')?.result).toMatchObject({
-      status: 'rejected', message: expect.stringContaining('Do not retry'),
+      status: 'rejected',
+      message: expect.stringContaining('Do not retry'),
     });
   });
 
@@ -773,7 +846,10 @@ describe('audit events for human decisions', () => {
     const [action] = [...store.actions.values()];
     await runner.decide(action.id, 'approve', 'Looks legitimate');
 
-    expect(store.events.map((e) => [e.kind, e.actorType])).toEqual([['requested', 'policy'], ['approved', 'reviewer']]);
+    expect(store.events.map((e) => [e.kind, e.actorType])).toEqual([
+      ['requested', 'policy'],
+      ['approved', 'reviewer'],
+    ]);
     expect(store.events[1]).toMatchObject({ actionId: action.id, note: 'Looks legitimate', toolName: 'issue_refund' });
   });
 

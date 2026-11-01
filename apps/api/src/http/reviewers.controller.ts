@@ -1,4 +1,17 @@
-import { BadRequestException, Body, Controller, Get, Logger, Param, ParseUUIDPipe, Patch, Post, Req, UseGuards, Inject } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Get,
+  Logger,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Req,
+  UseGuards,
+  Inject,
+} from '@nestjs/common';
 import type { Request } from 'express';
 import { NotFoundError } from '../agent/errors';
 import { hashPassword } from '../auth/password';

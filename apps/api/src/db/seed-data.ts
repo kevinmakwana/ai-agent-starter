@@ -50,13 +50,21 @@ async function insertShipment(pool: Pool, n: number, orderStatus: 'shipped' | 'd
     { at: daysAgo(delivered ? 3 : 1), location: 'Salt Lake City, UT', description: 'In transit' },
     delivered
       ? { at: daysAgo(1), location: 'Front door', description: 'Delivered' }
-      : { at: daysAgo(0.25), location: 'Denver, CO', description: status === 'out_for_delivery' ? 'Out for delivery' : 'Arrived at regional facility' },
+      : {
+          at: daysAgo(0.25),
+          location: 'Denver, CO',
+          description: status === 'out_for_delivery' ? 'Out for delivery' : 'Arrived at regional facility',
+        },
   ];
   const eta = delivered ? daysAgo(1) : new Date(Date.now() + (1 + (n % 3)) * 86_400_000).toISOString();
-  await pool.query(
-    'INSERT INTO shipments (order_id, carrier, tracking_number, status, eta, events) VALUES ($1, $2, $3, $4, $5, $6)',
-    [n, carrier.name, trackingNumber, status, eta, JSON.stringify(events)],
-  );
+  await pool.query('INSERT INTO shipments (order_id, carrier, tracking_number, status, eta, events) VALUES ($1, $2, $3, $4, $5, $6)', [
+    n,
+    carrier.name,
+    trackingNumber,
+    status,
+    eta,
+    JSON.stringify(events),
+  ]);
 }
 
 /**

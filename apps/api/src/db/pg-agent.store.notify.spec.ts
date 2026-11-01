@@ -8,9 +8,11 @@ const notice = (kind: string) => `NOTIFY ${JSON.stringify({ kind, conversationId
 function fakePool(respond: (text: string) => any[] | Error) {
   const calls: string[] = [];
   const run = async (text: string, values?: unknown[]) => {
-    const label = /^\s*(BEGIN|COMMIT|ROLLBACK)/.test(text) ? text.trim().split(/\s+/)[0]
-      : text.includes('pg_notify') ? `NOTIFY ${values?.[1]}`
-      : text.trim().split(/\s+/).slice(0, 3).join(' ');
+    const label = /^\s*(BEGIN|COMMIT|ROLLBACK)/.test(text)
+      ? text.trim().split(/\s+/)[0]
+      : text.includes('pg_notify')
+        ? `NOTIFY ${values?.[1]}`
+        : text.trim().split(/\s+/).slice(0, 3).join(' ');
     calls.push(label);
     const out = respond(text);
     if (out instanceof Error) throw out;
@@ -35,7 +37,13 @@ describe('PgAgentStore change signals', () => {
     const { pool, calls } = fakePool((t) => (t.includes('UPDATE actions') ? [actionRow] : [eventRow]));
     await new PgAgentStore(pool).decideAction('a1', 'approved', 'ok');
     expect(calls).toEqual([
-      'BEGIN', 'UPDATE actions SET', 'INSERT INTO approval_events', notice('audit'), notice('trace'), notice('approvals'), 'COMMIT',
+      'BEGIN',
+      'UPDATE actions SET',
+      'INSERT INTO approval_events',
+      notice('audit'),
+      notice('trace'),
+      notice('approvals'),
+      'COMMIT',
     ]);
   });
 
@@ -66,7 +74,12 @@ describe('PgAgentStore change signals', () => {
     expect(result.calls).toEqual(['BEGIN', 'UPDATE actions SET', notice('trace'), notice('approvals'), 'COMMIT']);
     const audit = fakePool(() => [eventRow]);
     await new PgAgentStore(audit.pool).addApprovalEvent({
-      kind: 'auto_approved', runId: 'r1', conversationId: C, actorType: 'policy', toolName: 'issue_refund', toolArgs: {},
+      kind: 'auto_approved',
+      runId: 'r1',
+      conversationId: C,
+      actorType: 'policy',
+      toolName: 'issue_refund',
+      toolArgs: {},
     });
     expect(audit.calls).toEqual(['BEGIN', 'INSERT INTO approval_events', notice('audit'), 'COMMIT']);
   });

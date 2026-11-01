@@ -14,7 +14,16 @@ import { PG_POOL } from '../src/tokens';
 const maybe = process.env.E2E_DATABASE_URL ? describe : describe.skip;
 const CSRF = { 'X-Requested-By': 'reviewer-console' };
 const LOGIN_ENV = { CUSTOMER_LOGIN: 'true', LOGIN_SMTP_URL: 'smtp://localhost:1025', LOGIN_EMAIL_FROM: 'support@example.com' };
-const ENV_KEYS = ['CUSTOMER_LOGIN', 'LOGIN_SMTP_URL', 'LOGIN_EMAIL_FROM', 'CUSTOMER_APP_URL', 'RATE_LIMIT_CUSTOMER_LOGIN_PER_MINUTE', 'COOKIE_SECURE', 'CUSTOMER_SESSION_TTL_DAYS', 'REVIEWER_API_KEY'];
+const ENV_KEYS = [
+  'CUSTOMER_LOGIN',
+  'LOGIN_SMTP_URL',
+  'LOGIN_EMAIL_FROM',
+  'CUSTOMER_APP_URL',
+  'RATE_LIMIT_CUSTOMER_LOGIN_PER_MINUTE',
+  'COOKIE_SECURE',
+  'CUSTOMER_SESSION_TTL_DAYS',
+  'REVIEWER_API_KEY',
+];
 const AVA = 'ava.brooks@example.com';
 
 maybe('customer login: magic link routes (e2e, real Postgres)', () => {
@@ -33,10 +42,18 @@ maybe('customer login: magic link routes (e2e, real Postgres)', () => {
     sent = [];
     failMail = false;
     const fake = {
-      sendLink: async (to: string, link: string) => { if (failMail) throw Object.assign(new Error(`550 ${to}`), { code: 'EENVELOPE' }); sent.push({ to, link }); },
+      sendLink: async (to: string, link: string) => {
+        if (failMail) throw Object.assign(new Error(`550 ${to}`), { code: 'EENVELOPE' });
+        sent.push({ to, link });
+      },
       close: () => undefined,
     };
-    app = (await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(LOGIN_MAILER).useValue(fake).compile()).createNestApplication();
+    app = (
+      await Test.createTestingModule({ imports: [AppModule] })
+        .overrideProvider(LOGIN_MAILER)
+        .useValue(fake)
+        .compile()
+    ).createNestApplication();
     configureApp(app);
     await app.init();
     pool = app.get(PG_POOL);
@@ -55,7 +72,10 @@ maybe('customer login: magic link routes (e2e, real Postgres)', () => {
     const res = await verify(tokenOf(sent.at(-1)!.link)).expect(200);
     return (res.headers['set-cookie'] as unknown as string[])[0].split(';')[0];
   };
-  const as = (cookie: string) => ({ get: (p: string) => http().get(p).set('Cookie', cookie), post: (p: string) => http().post(p).set('Cookie', cookie).set(CSRF) });
+  const as = (cookie: string) => ({
+    get: (p: string) => http().get(p).set('Cookie', cookie),
+    post: (p: string) => http().post(p).set('Cookie', cookie).set(CSRF),
+  });
 
   afterEach(async () => {
     await app?.close();
@@ -211,7 +231,7 @@ maybe('customer login: magic link routes (e2e, real Postgres)', () => {
       await as(cookie).post('/customer-auth/logout').expect(401);
     });
 
-    it('logout-all ends every session of that customer and nobody else\'s', async () => {
+    it("logout-all ends every session of that customer and nobody else's", async () => {
       const [one, two, ben] = [await signIn(), await signIn(), await signIn('ben.carter@example.com')];
       await as(one).post('/customer-auth/logout-all').expect(204);
       await as(one).get('/customer-auth/me').expect(401);

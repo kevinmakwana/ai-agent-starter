@@ -19,11 +19,7 @@ export interface StreamOptions {
 }
 
 /** `min * 2^attempt` capped at `max`, then jittered to between half and all of it. */
-export function backoffDelay(
-  attempt: number,
-  range: { min: number; max: number },
-  random: () => number = Math.random,
-): number {
+export function backoffDelay(attempt: number, range: { min: number; max: number }, random: () => number = Math.random): number {
   const base = Math.min(range.max, range.min * 2 ** attempt);
   return base * (0.5 + random() / 2);
 }
@@ -53,13 +49,7 @@ export function openStream(
   handlers: StreamHandlers,
   options: StreamOptions = {},
 ): () => void {
-  const {
-    fetchImpl = fetch,
-    backoff = { min: 1000, max: 15000 },
-    idleMs = 45_000,
-    random = Math.random,
-    sleep = wait,
-  } = options;
+  const { fetchImpl = fetch, backoff = { min: 1000, max: 15000 }, idleMs = 45_000, random = Math.random, sleep = wait } = options;
   const closed = new AbortController();
   const status = (s: StreamStatus) => {
     if (!closed.signal.aborted) handlers.onStatus(s);
@@ -97,7 +87,11 @@ export function openStream(
             const { value, done } = await reader.read();
             if (done) break;
             armIdle();
-            if (first) { first = false; attempt = 0; status('live'); }
+            if (first) {
+              first = false;
+              attempt = 0;
+              status('live');
+            }
             for (const m of parser.push(decoder.decode(value, { stream: true }))) handlers.onMessage(m);
           }
         } else {

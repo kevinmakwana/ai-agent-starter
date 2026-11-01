@@ -30,7 +30,10 @@ export class OpenAiProvider implements ChatProvider {
         body: JSON.stringify({
           model: this.opts.model,
           messages: messages.map(toOpenAi),
-          tools: tools.map((t) => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.inputSchema } })),
+          tools: tools.map((t) => ({
+            type: 'function',
+            function: { name: t.name, description: t.description, parameters: t.inputSchema },
+          })),
           tool_choice: 'auto',
           ...(this.opts.maxTokens ? { max_completion_tokens: this.opts.maxTokens } : {}),
         }),
@@ -51,7 +54,11 @@ export class OpenAiProvider implements ChatProvider {
     if (finish === 'content_filter') throw new UpstreamLlmError(this.name, 'the model declined to respond', 'finish_reason=content_filter');
     return {
       text: msg.content ?? undefined,
-      toolCalls: (msg.tool_calls ?? []).map((c: any) => ({ id: c.id, name: String(c.function?.name ?? ''), args: parseArgs(c.function?.arguments) })),
+      toolCalls: (msg.tool_calls ?? []).map((c: any) => ({
+        id: c.id,
+        name: String(c.function?.name ?? ''),
+        args: parseArgs(c.function?.arguments),
+      })),
       usage: data.usage
         ? {
             inputTokens: data.usage.prompt_tokens,
@@ -77,5 +84,9 @@ function toOpenAi(m: ChatMessage) {
 
 /** Invalid JSON is passed through as a string so schema validation rejects it with a clear message. */
 function parseArgs(raw: string | undefined): unknown {
-  try { return JSON.parse(raw || '{}'); } catch { return raw; }
+  try {
+    return JSON.parse(raw || '{}');
+  } catch {
+    return raw;
+  }
 }

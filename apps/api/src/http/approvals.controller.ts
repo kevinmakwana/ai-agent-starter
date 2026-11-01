@@ -8,13 +8,19 @@ import { DecideApprovalDto, ListApprovalEventsQuery, ListApprovalsQuery } from '
 import { ReviewerGuard } from './reviewer.guard';
 
 const STATUS: Record<string, ActionStatus | undefined> = {
-  pending: 'pending_approval', approved: 'approved', rejected: 'rejected', all: undefined,
+  pending: 'pending_approval',
+  approved: 'approved',
+  rejected: 'rejected',
+  all: undefined,
 };
 
 @Controller('approvals')
 @UseGuards(ReviewerGuard)
 export class ApprovalsController {
-  constructor(private readonly store: PgAgentStore, private readonly runner: AgentRunner) {}
+  constructor(
+    private readonly store: PgAgentStore,
+    private readonly runner: AgentRunner,
+  ) {}
 
   @Get()
   list(@Query() q: ListApprovalsQuery) {

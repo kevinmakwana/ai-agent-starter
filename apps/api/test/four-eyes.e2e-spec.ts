@@ -52,14 +52,19 @@ maybe('four-eyes approvals over HTTP (e2e, real Postgres)', () => {
 
   const decide = (cookie: string, id: string, decision: 'approve' | 'reject' = 'approve', note?: string) =>
     http().post(`/approvals/${id}`).set('Cookie', cookie).set(CSRF).send({ decision, note });
-  const view = async (cookie: string, status = 'pending') => (await http().get(`/approvals?status=${status}`).set('Cookie', cookie).expect(200)).body;
+  const view = async (cookie: string, status = 'pending') =>
+    (await http().get(`/approvals?status=${status}`).set('Cookie', cookie).expect(200)).body;
   const events = async (cookie: string) => (await http().get('/approvals/events').set('Cookie', cookie).expect(200)).body.reverse();
   const refunds = async () => (await pool.query('SELECT count(*)::int AS n FROM refunds WHERE order_id = 1')).rows[0].n as number;
 
   /** A customer asks for the $50 refund; returns the parked approval. */
   const parkRefund = async (cookie: string, customerId = 1, message = REFUND) => {
     const conv = (await http().post('/conversations').send({ customerId }).expect(201)).body;
-    const sent = await http().post(`/conversations/${conv.id}/messages`).set('X-Conversation-Token', conv.accessToken).send({ content: message }).expect(201);
+    const sent = await http()
+      .post(`/conversations/${conv.id}/messages`)
+      .set('X-Conversation-Token', conv.accessToken)
+      .send({ content: message })
+      .expect(201);
     expect(sent.body.run.status).toBe('awaiting_approval');
     const [approval] = (await view(cookie)).filter((a: { conversationId: string }) => a.conversationId === conv.id);
     return { conv, approval };
@@ -84,7 +89,13 @@ maybe('four-eyes approvals over HTTP (e2e, real Postgres)', () => {
     it('parks needing two approvals; the first approval is recorded and executes nothing', async () => {
       const alice = await signIn('alice');
       const { approval } = await parkRefund(alice.cookie);
-      expect(approval).toMatchObject({ approvalsRequired: 2, approvalsGiven: 0, approvedBy: [], status: 'pending_approval', policyRule: 'always_review' });
+      expect(approval).toMatchObject({
+        approvalsRequired: 2,
+        approvalsGiven: 0,
+        approvedBy: [],
+        status: 'pending_approval',
+        policyRule: 'always_review',
+      });
 
       const first = await decide(alice.cookie, approval.id, 'approve', 'looks right').expect(201);
       expect(first.body.action.status).toBe('pending_approval');
@@ -92,11 +103,23 @@ maybe('four-eyes approvals over HTTP (e2e, real Postgres)', () => {
       expect(await refunds()).toBe(0);
 
       const [now] = await view(alice.cookie);
-      expect(now).toMatchObject({ status: 'pending_approval', approvalsRequired: 2, approvalsGiven: 1, approvedBy: ['alice'], approvedByIds: [alice.id] });
+      expect(now).toMatchObject({
+        status: 'pending_approval',
+        approvalsRequired: 2,
+        approvalsGiven: 1,
+        approvedBy: ['alice'],
+        approvedByIds: [alice.id],
+      });
       const log = await events(alice.cookie);
       expect(log.map((e: { kind: string }) => e.kind)).toEqual(['requested', 'first_approval']);
       expect(log[0].detail).toMatchObject({ approvalsRequired: 2 });
-      expect(log[1]).toMatchObject({ actorType: 'reviewer', actorId: alice.id, actorName: 'alice', note: 'looks right', detail: { given: 1, required: 2 } });
+      expect(log[1]).toMatchObject({
+        actorType: 'reviewer',
+        actorId: alice.id,
+        actorName: 'alice',
+        note: 'looks right',
+        detail: { given: 1, required: 2 },
+      });
     });
 
     it('refuses the same reviewer a second time with ALREADY_APPROVED_BY_YOU', async () => {
@@ -123,7 +146,11 @@ maybe('four-eyes approvals over HTTP (e2e, real Postgres)', () => {
       const [decided] = await view(alice.cookie, 'approved');
       expect(decided).toMatchObject({ approvalsGiven: 2, approvedBy: ['alice', 'bob'], approvedByIds: [alice.id, bob.id] });
       const log = await events(alice.cookie);
-      expect(log.map((e: { kind: string; actorName: string | null }) => [e.kind, e.actorName])).toEqual([['requested', null], ['first_approval', 'alice'], ['approved', 'bob']]);
+      expect(log.map((e: { kind: string; actorName: string | null }) => [e.kind, e.actorName])).toEqual([
+        ['requested', null],
+        ['first_approval', 'alice'],
+        ['approved', 'bob'],
+      ]);
       await decide(bob.cookie, approval.id).expect(409); // already decided
       expect(await refunds()).toBe(1);
       expect(conv.id).toBeDefined();
@@ -136,7 +163,9 @@ maybe('four-eyes approvals over HTTP (e2e, real Postgres)', () => {
       const [a, b] = await Promise.all([decide(bob.cookie, approval.id), decide(carol.cookie, approval.id)]);
       expect([a.status, b.status].sort()).toEqual([201, 409]);
       expect(await refunds()).toBe(1);
-      expect((await pool.query('SELECT count(*)::int AS n FROM action_approvals WHERE action_id = $1', [approval.id])).rows[0].n).toBe(3 - 1);
+      expect((await pool.query('SELECT count(*)::int AS n FROM action_approvals WHERE action_id = $1', [approval.id])).rows[0].n).toBe(
+        3 - 1,
+      );
     });
 
     it('many reviewers approving at the same instant: exactly one transition reaches the count', async () => {
@@ -150,14 +179,21 @@ maybe('four-eyes approvals over HTTP (e2e, real Postgres)', () => {
       const results = await Promise.all(others.map((r) => agentStore.approveStep(approval.id, { id: r.id })));
       expect(results.filter((r) => r?.final === true)).toHaveLength(1);
       expect(results.filter((r) => r === null)).toHaveLength(8);
-      expect((await pool.query('SELECT count(*)::int AS n FROM approval_events WHERE kind = $1 AND action_id = $2', ['approved', approval.id])).rows[0].n).toBe(1);
+      expect(
+        (await pool.query('SELECT count(*)::int AS n FROM approval_events WHERE kind = $1 AND action_id = $2', ['approved', approval.id]))
+          .rows[0].n,
+      ).toBe(1);
       expect((await pool.query('SELECT count(*)::int AS n FROM action_approvals WHERE action_id = $1', [approval.id])).rows[0].n).toBe(2);
     });
 
     it('one reviewer racing two first approvals cannot satisfy four-eyes alone', async () => {
       const alice = await signIn('alice');
       const { approval } = await parkRefund(alice.cookie);
-      const results = await Promise.all([decide(alice.cookie, approval.id), decide(alice.cookie, approval.id), decide(alice.cookie, approval.id)]);
+      const results = await Promise.all([
+        decide(alice.cookie, approval.id),
+        decide(alice.cookie, approval.id),
+        decide(alice.cookie, approval.id),
+      ]);
       expect(results.map((r) => r.status).sort()).toEqual([201, 409, 409]);
       expect(results.filter((r) => r.status === 409).every((r) => r.body.code === 'ALREADY_APPROVED_BY_YOU')).toBe(true);
       expect(await refunds()).toBe(0);
@@ -234,7 +270,10 @@ maybe('four-eyes approvals over HTTP (e2e, real Postgres)', () => {
       const done = await decide(alice.cookie, approval.id).expect(201);
       expect(done.body.action.status).toBe('approved');
       expect(await refunds()).toBe(1);
-      expect((await events(alice.cookie)).map((e: { kind: string; actorName: string | null }) => [e.kind, e.actorName])).toEqual([['requested', null], ['approved', 'alice']]);
+      expect((await events(alice.cookie)).map((e: { kind: string; actorName: string | null }) => [e.kind, e.actorName])).toEqual([
+        ['requested', null],
+        ['approved', 'alice'],
+      ]);
     });
   });
 
@@ -246,9 +285,9 @@ maybe('four-eyes approvals over HTTP (e2e, real Postgres)', () => {
       const { approval } = await parkRefund(alice.cookie, 1, CANCEL);
       expect(approval).toMatchObject({ toolName: 'cancel_order', approvalsRequired: 2 });
       await decide(alice.cookie, approval.id).expect(201);
-      expect((await pool.query("SELECT status FROM orders WHERE id = 11")).rows[0].status).toBe('processing');
+      expect((await pool.query('SELECT status FROM orders WHERE id = 11')).rows[0].status).toBe('processing');
       await decide(bob.cookie, approval.id).expect(201);
-      expect((await pool.query("SELECT status FROM orders WHERE id = 11")).rows[0].status).toBe('cancelled');
+      expect((await pool.query('SELECT status FROM orders WHERE id = 11')).rows[0].status).toBe('cancelled');
     });
 
     it('stay at one approval by default', async () => {
@@ -257,7 +296,7 @@ maybe('four-eyes approvals over HTTP (e2e, real Postgres)', () => {
       const { approval } = await parkRefund(alice.cookie, 1, CANCEL);
       expect(approval).toMatchObject({ toolName: 'cancel_order', approvalsRequired: 1 });
       await decide(alice.cookie, approval.id).expect(201);
-      expect((await pool.query("SELECT status FROM orders WHERE id = 11")).rows[0].status).toBe('cancelled');
+      expect((await pool.query('SELECT status FROM orders WHERE id = 11')).rows[0].status).toBe('cancelled');
     });
   });
 
@@ -266,7 +305,11 @@ maybe('four-eyes approvals over HTTP (e2e, real Postgres)', () => {
       await boot();
       const parkDemo = async () => {
         const conv = (await http().post('/conversations').send({ customerId: 1 }).expect(201)).body;
-        await http().post(`/conversations/${conv.id}/messages`).set('X-Conversation-Token', conv.accessToken).send({ content: REFUND }).expect(201);
+        await http()
+          .post(`/conversations/${conv.id}/messages`)
+          .set('X-Conversation-Token', conv.accessToken)
+          .send({ content: REFUND })
+          .expect(201);
         return (await http().get('/approvals?status=pending').expect(200)).body[0];
       };
       const approval = await parkDemo();
@@ -281,7 +324,11 @@ maybe('four-eyes approvals over HTTP (e2e, real Postgres)', () => {
       await boot({ REVIEWER_API_KEY: 'rev-key', FOUR_EYES_REFUND_OVER: '60' });
       const key = { Authorization: 'Bearer rev-key' };
       const conv = (await http().post('/conversations').send({ customerId: 1 }).expect(201)).body;
-      await http().post(`/conversations/${conv.id}/messages`).set('X-Conversation-Token', conv.accessToken).send({ content: REFUND }).expect(201);
+      await http()
+        .post(`/conversations/${conv.id}/messages`)
+        .set('X-Conversation-Token', conv.accessToken)
+        .send({ content: REFUND })
+        .expect(201);
       const [approval] = (await http().get('/approvals?status=pending').set(key).expect(200)).body;
       expect(approval.approvalsRequired).toBe(1); // $50 is not over $60
       await http().post(`/approvals/${approval.id}`).set(key).send({ decision: 'approve' }).expect(201);

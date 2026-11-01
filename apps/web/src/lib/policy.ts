@@ -10,8 +10,10 @@ export function describeRule(rule: string | null, detail: PolicyDetail | null): 
   const { threshold, priorRefunded, amount } = detail ?? {};
   const full = threshold != null && priorRefunded != null && amount != null;
   switch (rule) {
-    case 'always_review': return 'Every refund needs review';
-    case 'tool_requires_review': return 'This kind of action always needs review';
+    case 'always_review':
+      return 'Every refund needs review';
+    case 'tool_requires_review':
+      return 'This kind of action always needs review';
     case 'over_threshold':
       return full
         ? `Refunds on this order would total ${usd(priorRefunded + amount)} (${usd(amount)} now + ${usd(priorRefunded)} already refunded), at or over the ${usd(threshold)} auto-approve limit`
@@ -20,6 +22,7 @@ export function describeRule(rule: string | null, detail: PolicyDetail | null): 
       return full
         ? `Refunds on this order would total ${usd(priorRefunded + amount)}, under the ${usd(threshold)} auto-approve limit`
         : 'Under the auto-approve limit';
-    default: return null;
+    default:
+      return null;
   }
 }

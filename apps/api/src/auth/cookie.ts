@@ -11,7 +11,10 @@ export function readCookie(req: Pick<Request, 'headers'>, name: string): string 
   for (const part of header.split(';')) {
     const eq = part.indexOf('=');
     if (eq < 0 || part.slice(0, eq).trim() !== name) continue;
-    const raw = part.slice(eq + 1).trim().replace(/^"(.*)"$/, '$1');
+    const raw = part
+      .slice(eq + 1)
+      .trim()
+      .replace(/^"(.*)"$/, '$1');
     try {
       return decodeURIComponent(raw);
     } catch {
@@ -21,7 +24,13 @@ export function readCookie(req: Pick<Request, 'headers'>, name: string): string 
   return undefined;
 }
 
-const cookie = (secure: boolean, maxAgeMs: number): CookieOptions => ({ httpOnly: true, sameSite: 'strict', path: '/', secure, maxAge: maxAgeMs });
+const cookie = (secure: boolean, maxAgeMs: number): CookieOptions => ({
+  httpOnly: true,
+  sameSite: 'strict',
+  path: '/',
+  secure,
+  maxAge: maxAgeMs,
+});
 
 export const sessionCookieOptions = (auth: AppConfig['auth']): CookieOptions => cookie(auth.cookieSecure, auth.sessionTtlHours * 3_600_000);
 

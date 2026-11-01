@@ -4,7 +4,10 @@ import { useEffect, useRef, useState } from 'react';
 import { authHeaders, type Auth } from './api';
 import { openStream, type StreamStatus } from './stream';
 
-export interface StreamChange { kind: string; conversationId?: string }
+export interface StreamChange {
+  kind: string;
+  conversationId?: string;
+}
 
 /**
  * Subscribes to a server-sent-event stream and reports the changes it signals, coalesced over `debounceMs` so a
@@ -24,7 +27,10 @@ export function useEventStream(
   const key = target?.auth.key;
 
   useEffect(() => {
-    if (!path) { setStatus('down'); return; }
+    if (!path) {
+      setStatus('down');
+      return;
+    }
     setStatus('connecting');
     let pending: StreamChange[] = [];
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -39,14 +45,24 @@ export function useEventStream(
       if (!timer) timer = setTimeout(flush, debounceMs);
     };
     const close = openStream(`/api${path}`, authHeaders({ token, key }), {
-      onStatus: (s) => { setStatus(s); if (s === 'live') queue({ kind: 'resync' }); },
+      onStatus: (s) => {
+        setStatus(s);
+        if (s === 'live') queue({ kind: 'resync' });
+      },
       onMessage: (m) => {
         let conversationId: string | undefined;
-        try { conversationId = JSON.parse(m.data)?.conversationId; } catch { /* a bad payload still counts as a change */ }
+        try {
+          conversationId = JSON.parse(m.data)?.conversationId;
+        } catch {
+          /* a bad payload still counts as a change */
+        }
         queue({ kind: m.event, conversationId });
       },
     });
-    return () => { close(); clearTimeout(timer); };
+    return () => {
+      close();
+      clearTimeout(timer);
+    };
   }, [path, token, key, debounceMs]);
 
   return status;

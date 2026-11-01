@@ -184,7 +184,9 @@ describe('ApprovalExpiry.recoverStranded', () => {
   it('reports a failure and keeps going', async () => {
     const ctx = setup();
     await crashAfterClaim(ctx, 'approved', 10 * MIN);
-    ctx.shop.createRefund = async () => { throw new Error('db down'); };
+    ctx.shop.createRefund = async () => {
+      throw new Error('db down');
+    };
     expect(await ctx.expiry.recoverStranded()).toEqual({ recovered: 0, failed: 1 });
     expect(ctx.errors).toHaveLength(1);
   });

@@ -12,8 +12,12 @@ import { createPool, ensureSchema } from './pool';
 @Injectable()
 class DatabaseLifecycle implements OnModuleInit, OnApplicationShutdown {
   constructor(@Inject(PG_POOL) private readonly pool: Pool) {}
-  onModuleInit() { return ensureSchema(this.pool); }
-  onApplicationShutdown() { return this.pool.end(); }
+  onModuleInit() {
+    return ensureSchema(this.pool);
+  }
+  onApplicationShutdown() {
+    return this.pool.end();
+  }
 }
 
 @Global()

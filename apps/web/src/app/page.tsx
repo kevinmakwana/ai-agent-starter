@@ -44,24 +44,33 @@ export default function CustomerChat() {
   const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
   useEffect(() => {
-    (async () => {
+    void (async () => {
       try {
         const h = await api.health();
         setProvider(h.provider);
         if (h.customerLogin) {
-          const who = await api.customerMe().then((r) => r.customer).catch(() => null);
+          const who = await api
+            .customerMe()
+            .then((r) => r.customer)
+            .catch(() => null);
           setMe(who);
           if (who) setMyChats(await api.myConversations().catch(() => []));
         } else {
           setStoredChats(loadChats());
           // Demo convenience: the customer directory is only listable while reviewer auth is off.
-          api.customers({}).then(setCustomers).catch(() => setCustomers([]));
+          api
+            .customers({})
+            .then(setCustomers)
+            .catch(() => setCustomers([]));
         }
         setHealth(h); // after `me`, so the sign-in form never flashes for someone who is signed in
       } catch {
         setProvider('offline');
         setStoredChats(loadChats());
-        api.customers({}).then(setCustomers).catch(() => setCustomers([]));
+        api
+          .customers({})
+          .then(setCustomers)
+          .catch(() => setCustomers([]));
         setHealth({ customerLogin: false });
       }
     })();
@@ -73,7 +82,10 @@ export default function CustomerChat() {
 
   /** The session ended (expired, logged out in another tab): back to the sign-in form. */
   const sessionEnded = useCallback(() => {
-    setMe(null); setSelectedId(null); setDetail(null); setMyChats([]);
+    setMe(null);
+    setSelectedId(null);
+    setDetail(null);
+    setMyChats([]);
   }, []);
 
   const refresh = useCallback(async () => {
@@ -84,29 +96,45 @@ export default function CustomerChat() {
       // Drop a response that a newer refresh has overtaken, or that belongs to a chat the user has since left.
       if (current() && d.conversation.id === selectedIdRef.current) setDetail(d);
       // keeps the "waiting for approval" chip in the list current; a failed refresh keeps the list as it was
-      if (loginMode) await api.myConversations().then(setMyChats).catch(() => undefined);
+      if (loginMode)
+        await api
+          .myConversations()
+          .then(setMyChats)
+          .catch(() => undefined);
     } catch (e) {
-      if (loginMode && e instanceof ApiError && e.status === 401) { sessionEnded(); return; }
+      if (loginMode && e instanceof ApiError && e.status === 401) {
+        sessionEnded();
+        return;
+      }
       if (current()) setError(message(e));
     }
   }, [selectedChatId, selectedToken, detailSeq, loginMode, sessionEnded]);
 
   const stream = useEventStream(
     selectedChatId ? { path: `/conversations/${selectedChatId}/events`, auth: loginMode ? {} : { token: selectedToken } } : null,
-    () => { void refresh(); },
+    () => {
+      void refresh();
+    },
   );
 
-  useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
 
   // Poll only while the live stream is not up. `live` is reported on the first bytes of the body, so a proxy that
   // buffers SSE never gets there and the page degrades to the old polling.
   useEffect(() => {
     if (stream === 'live') return;
+    // eslint-disable-next-line @typescript-eslint/no-misused-promises -- refresh catches its own errors
     const t = setInterval(refresh, sending ? 500 : 3000);
     return () => clearInterval(t);
   }, [refresh, sending, stream]);
 
-  const select = (id: string) => { setSelectedId(id); setDetail(null); setError(null); };
+  const select = (id: string) => {
+    setSelectedId(id);
+    setDetail(null);
+    setError(null);
+  };
 
   const start = async (who: { customerId: number } | { email: string }) => {
     try {
@@ -124,19 +152,24 @@ export default function CustomerChat() {
       setMyChats(await api.myConversations());
       select(c.id);
     } catch (e) {
-      if (e instanceof ApiError && e.status === 401) sessionEnded(); else setError(message(e));
+      if (e instanceof ApiError && e.status === 401) sessionEnded();
+      else setError(message(e));
     }
   };
 
   const send = async (text: string) => {
     if (!selected) return;
-    setSending(true); setOptimistic(text); setError(null);
+    setSending(true);
+    setOptimistic(text);
+    setError(null);
     try {
       await api.send(selected.id, text, authFor(selected));
     } catch (e) {
-      if (loginMode && e instanceof ApiError && e.status === 401) sessionEnded(); else setError(message(e));
+      if (loginMode && e instanceof ApiError && e.status === 401) sessionEnded();
+      else setError(message(e));
     } finally {
-      setSending(false); setOptimistic(null);
+      setSending(false);
+      setOptimistic(null);
       await refresh();
     }
   };
@@ -159,12 +192,24 @@ export default function CustomerChat() {
 
   const summaries: ConversationSummary[] = loginMode
     ? myChats.map((c) => ({
-        id: c.id, customerName: me?.name ?? '', createdAt: c.createdAt, customerId: 0, customerEmail: '', title: c.title,
-        lastStatus: c.lastStatus, pendingApprovals: c.awaitingApproval ? 1 : 0,
+        id: c.id,
+        customerName: me?.name ?? '',
+        createdAt: c.createdAt,
+        customerId: 0,
+        customerEmail: '',
+        title: c.title,
+        lastStatus: c.lastStatus,
+        pendingApprovals: c.awaitingApproval ? 1 : 0,
       }))
     : storedChats.map((c) => ({
-        id: c.id, customerName: c.customerName, createdAt: c.createdAt, customerId: 0, customerEmail: '', title: '',
-        lastStatus: null, pendingApprovals: c.id === selectedId && detail?.runs.at(-1)?.status === 'awaiting_approval' ? 1 : 0,
+        id: c.id,
+        customerName: c.customerName,
+        createdAt: c.createdAt,
+        customerId: 0,
+        customerEmail: '',
+        title: '',
+        lastStatus: null,
+        pendingApprovals: c.id === selectedId && detail?.runs.at(-1)?.status === 'awaiting_approval' ? 1 : 0,
       }));
   const customer = customers?.find((c) => c.id === detail?.conversation.customerId);
 

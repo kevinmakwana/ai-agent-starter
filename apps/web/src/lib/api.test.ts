@@ -3,7 +3,9 @@ import { afterEach, describe, it } from 'node:test';
 import { api } from './api';
 
 const realFetch = globalThis.fetch;
-afterEach(() => { globalThis.fetch = realFetch; });
+afterEach(() => {
+  globalThis.fetch = realFetch;
+});
 
 function stubFetch(body: unknown = {}, status = 200) {
   const seen: { url: string; init: RequestInit }[] = [];
@@ -57,7 +59,10 @@ describe('api: accounts', () => {
 
   it('surfaces the API message and status on failure', async () => {
     stubFetch({ message: 'Invalid email or password' }, 401);
-    await assert.rejects(api.login('a@example.com', 'x'), (e: Error & { status?: number }) => e.message === 'Invalid email or password' && e.status === 401);
+    await assert.rejects(
+      api.login('a@example.com', 'x'),
+      (e: Error & { status?: number }) => e.message === 'Invalid email or password' && e.status === 401,
+    );
   });
 });
 

@@ -52,7 +52,9 @@ export class StreamBus implements OnModuleInit, BeforeApplicationShutdown, OnApp
 
   subscribe(listener: (e: AgentEvent) => void): () => void {
     this.listeners.add(listener);
-    return () => { this.listeners.delete(listener); };
+    return () => {
+      this.listeners.delete(listener);
+    };
   }
 
   /**
@@ -60,9 +62,14 @@ export class StreamBus implements OnModuleInit, BeforeApplicationShutdown, OnApp
    * themselves: Nest's HTTP server close waits for open connections, and an SSE response never ends on its own.
    */
   onClosing(cb: () => void): () => void {
-    if (this.stopped) { cb(); return () => undefined; }
+    if (this.stopped) {
+      cb();
+      return () => undefined;
+    }
     this.closers.add(cb);
-    return () => { this.closers.delete(cb); };
+    return () => {
+      this.closers.delete(cb);
+    };
   }
 
   async onModuleInit(): Promise<void> {
@@ -77,7 +84,11 @@ export class StreamBus implements OnModuleInit, BeforeApplicationShutdown, OnApp
     const closers = [...this.closers];
     this.closers.clear();
     for (const close of closers) {
-      try { close(); } catch (e) { this.opts.onError?.(e); }
+      try {
+        close();
+      } catch (e) {
+        this.opts.onError?.(e);
+      }
     }
   }
 
@@ -92,7 +103,11 @@ export class StreamBus implements OnModuleInit, BeforeApplicationShutdown, OnApp
 
   private emit(event: AgentEvent) {
     for (const listener of this.listeners) {
-      try { listener(event); } catch (e) { this.opts.onError?.(e); }
+      try {
+        listener(event);
+      } catch (e) {
+        this.opts.onError?.(e);
+      }
     }
   }
 
@@ -107,7 +122,11 @@ export class StreamBus implements OnModuleInit, BeforeApplicationShutdown, OnApp
       this.scheduleRetry();
     };
     // Attached before connecting so an error during connect is never unhandled.
-    conn.on('error', (e) => { this.opts.onError?.(e); lost(); conn.end().catch(() => undefined); });
+    conn.on('error', (e) => {
+      this.opts.onError?.(e);
+      lost();
+      conn.end().catch(() => undefined);
+    });
     conn.on('end', lost);
     conn.on('notification', (m: { payload?: string }) => {
       const event = parseEvent(m.payload);
@@ -123,7 +142,10 @@ export class StreamBus implements OnModuleInit, BeforeApplicationShutdown, OnApp
       this.scheduleRetry();
       return;
     }
-    if (this.stopped) { conn.end().catch(() => undefined); return; }
+    if (this.stopped) {
+      conn.end().catch(() => undefined);
+      return;
+    }
     this.conn = conn;
     this.attempt = 0;
     this.scheduleHeartbeat(conn, lost);
@@ -139,12 +161,15 @@ export class StreamBus implements OnModuleInit, BeforeApplicationShutdown, OnApp
    */
   private scheduleHeartbeat(conn: ListenConnection, lost: () => void) {
     const { intervalMs, timeoutMs } = this.opts.heartbeat ?? { intervalMs: 30_000, timeoutMs: 10_000 };
+    // eslint-disable-next-line @typescript-eslint/no-misused-promises -- every failure path inside is caught
     this.heartbeatTimer = setTimeout(async () => {
       let guard: NodeJS.Timeout | undefined;
       try {
         await Promise.race([
           conn.query('SELECT 1'),
-          new Promise((_, reject) => { guard = setTimeout(() => reject(new Error('listener heartbeat timed out')), timeoutMs); }),
+          new Promise((_, reject) => {
+            guard = setTimeout(() => reject(new Error('listener heartbeat timed out')), timeoutMs);
+          }),
         ]);
       } catch (e) {
         if (this.conn === conn) this.opts.onError?.(e);
@@ -163,6 +188,9 @@ export class StreamBus implements OnModuleInit, BeforeApplicationShutdown, OnApp
     if (this.stopped || this.timer) return;
     const { min, max } = this.opts.retryMs ?? { min: 200, max: 5000 };
     const delay = Math.min(max, min * 2 ** this.attempt++);
-    this.timer = setTimeout(() => { this.timer = undefined; void this.open(); }, delay);
+    this.timer = setTimeout(() => {
+      this.timer = undefined;
+      void this.open();
+    }, delay);
   }
 }

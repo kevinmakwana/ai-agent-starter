@@ -20,8 +20,13 @@ describe('forwardToApi: request', () => {
     const req = new Request('http://web.test/api/approvals/1', {
       method: 'POST',
       headers: {
-        cookie: 'reviewer_session=tok', 'x-requested-by': 'reviewer-console', authorization: 'Bearer k', 'x-conversation-token': 'ct',
-        'content-type': 'application/json', 'x-forwarded-for': '203.0.113.9', 'x-something-else': 'dropped',
+        cookie: 'reviewer_session=tok',
+        'x-requested-by': 'reviewer-console',
+        authorization: 'Bearer k',
+        'x-conversation-token': 'ct',
+        'content-type': 'application/json',
+        'x-forwarded-for': '203.0.113.9',
+        'x-something-else': 'dropped',
       },
       body: '{"decision":"approve"}',
     });
@@ -40,7 +45,11 @@ describe('forwardToApi: request', () => {
 
   it('never invents the CSRF header: a request without it stays without it', async () => {
     const { seen, fetchImpl } = upstream(Response.json({}));
-    await call(new Request('http://web.test/api/auth/logout', { method: 'POST', headers: { cookie: 'reviewer_session=tok' }, body: '' }), ['auth', 'logout'], fetchImpl);
+    await call(
+      new Request('http://web.test/api/auth/logout', { method: 'POST', headers: { cookie: 'reviewer_session=tok' }, body: '' }),
+      ['auth', 'logout'],
+      fetchImpl,
+    );
     assert.equal(headersOf(seen[0].init).get('x-requested-by'), null);
   });
 
@@ -49,7 +58,11 @@ describe('forwardToApi: request', () => {
     await call(new Request('http://web.test/api/approvals?status=pending'), ['approvals'], fetchImpl);
     assert.equal(seen[0].url, 'http://api.test/approvals?status=pending');
     assert.equal(seen[0].init.body, undefined);
-    await call(new Request('http://web.test/api/reviewers/9', { method: 'PATCH', body: '{"active":false}' }), ['reviewers', '9'], fetchImpl);
+    await call(
+      new Request('http://web.test/api/reviewers/9', { method: 'PATCH', body: '{"active":false}' }),
+      ['reviewers', '9'],
+      fetchImpl,
+    );
     assert.equal(seen[1].init.method, 'PATCH');
     assert.equal(seen[1].init.body, '{"active":false}');
   });
@@ -62,10 +75,7 @@ describe('forwardToApi: response', () => {
     res.headers.append('set-cookie', 'other=1; Path=/');
     const { fetchImpl } = upstream(res);
     const out = await call(new Request('http://web.test/api/auth/login', { method: 'POST', body: '{}' }), ['auth', 'login'], fetchImpl);
-    assert.deepEqual(out.headers.getSetCookie(), [
-      'reviewer_session=abc; Path=/; HttpOnly; SameSite=Strict',
-      'other=1; Path=/',
-    ]);
+    assert.deepEqual(out.headers.getSetCookie(), ['reviewer_session=abc; Path=/; HttpOnly; SameSite=Strict', 'other=1; Path=/']);
   });
 
   it('keeps status and content type, and marks event streams uncacheable and unbuffered', async () => {
@@ -80,7 +90,9 @@ describe('forwardToApi: response', () => {
   });
 
   it('answers 502 when the API is unreachable', async () => {
-    const out = await call(new Request('http://web.test/api/health'), ['health'], (async () => { throw new Error('ECONNREFUSED'); }) as typeof fetch);
+    const out = await call(new Request('http://web.test/api/health'), ['health'], (async () => {
+      throw new Error('ECONNREFUSED');
+    }) as typeof fetch);
     assert.equal(out.status, 502);
   });
 });

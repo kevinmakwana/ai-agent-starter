@@ -2,7 +2,18 @@ import { createHash, randomBytes } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 import { ConflictError } from '../agent/errors';
 import type {
-  Action, ActionStatus, AgentStore, ApprovalEvent, Conversation, DecisionAudit, NewAction, NewApprovalEvent, NewStep, Run, RunMeta, Step,
+  Action,
+  ActionStatus,
+  AgentStore,
+  ApprovalEvent,
+  Conversation,
+  DecisionAudit,
+  NewAction,
+  NewApprovalEvent,
+  NewStep,
+  Run,
+  RunMeta,
+  Step,
 } from '../agent/types';
 import { AGENT_EVENTS_CHANNEL, type AgentEventKind, encodeEvent } from '../events/agent-events';
 import type { ClaimedAction } from '../notify/types';
@@ -54,7 +65,10 @@ export interface ApprovalView extends Action {
 }
 
 export class PgAgentStore implements AgentStore {
-  constructor(private readonly pool: Pool, private readonly staleRunMs = STALE_RUN_MS) {}
+  constructor(
+    private readonly pool: Pool,
+    private readonly staleRunMs = STALE_RUN_MS,
+  ) {}
 
   private static readonly CONVERSATION = `
     SELECT c.id, c.customer_id, c.title, c.created_at, cu.name AS customer_name, cu.email AS customer_email
@@ -93,12 +107,18 @@ export class PgAgentStore implements AgentStore {
 
   /** Login mode: no token is issued, so the conversation is reachable only through its customer's session (or a reviewer). */
   async createConversationForCustomer(customerId: number, title: string): Promise<Conversation> {
-    const { rows } = await this.pool.query('INSERT INTO conversations (customer_id, title) VALUES ($1, $2) RETURNING id', [customerId, title]);
+    const { rows } = await this.pool.query('INSERT INTO conversations (customer_id, title) VALUES ($1, $2) RETURNING id', [
+      customerId,
+      title,
+    ]);
     return (await this.getConversation(rows[0].id))!;
   }
 
   async conversationBelongsToCustomer(conversationId: string, customerId: number): Promise<boolean> {
-    const { rowCount } = await this.pool.query('SELECT 1 FROM conversations WHERE id = $1 AND customer_id = $2', [conversationId, customerId]);
+    const { rowCount } = await this.pool.query('SELECT 1 FROM conversations WHERE id = $1 AND customer_id = $2', [
+      conversationId,
+      customerId,
+    ]);
     return (rowCount ?? 0) > 0;
   }
 
@@ -115,8 +135,10 @@ export class PgAgentStore implements AgentStore {
   }
 
   async verifyConversationToken(id: string, token: string): Promise<boolean> {
-    const { rowCount } = await this.pool.query(
-      'SELECT 1 FROM conversations WHERE id = $1 AND access_token_hash = $2', [id, hashToken(token)]);
+    const { rowCount } = await this.pool.query('SELECT 1 FROM conversations WHERE id = $1 AND access_token_hash = $2', [
+      id,
+      hashToken(token),
+    ]);
     return (rowCount ?? 0) > 0;
   }
 
@@ -137,8 +159,9 @@ export class PgAgentStore implements AgentStore {
   }
 
   async hasPendingApproval(conversationId: string): Promise<boolean> {
-    const { rowCount } = await this.pool.query(
-      "SELECT 1 FROM actions WHERE conversation_id = $1 AND status = 'pending_approval' LIMIT 1", [conversationId]);
+    const { rowCount } = await this.pool.query("SELECT 1 FROM actions WHERE conversation_id = $1 AND status = 'pending_approval' LIMIT 1", [
+      conversationId,
+    ]);
     return (rowCount ?? 0) > 0;
   }
 
@@ -157,10 +180,9 @@ export class PgAgentStore implements AgentStore {
                            AND s.created_at > now() - $2::double precision * interval '1 millisecond')`,
         [conversationId, this.staleRunMs],
       );
-      const busy = await db.query(
-        "SELECT 1 FROM runs WHERE conversation_id = $1 AND status IN ('running', 'awaiting_approval') LIMIT 1",
-        [conversationId],
-      );
+      const busy = await db.query("SELECT 1 FROM runs WHERE conversation_id = $1 AND status IN ('running', 'awaiting_approval') LIMIT 1", [
+        conversationId,
+      ]);
       if (busy.rowCount) throw new ConflictError('This conversation already has a run in progress or waiting for approval.');
       const { rows } = await db.query(
         "INSERT INTO runs (conversation_id, status, provider, model, prompt_version) VALUES ($1, 'running', $2, $3, $4) RETURNING *",
@@ -198,9 +220,20 @@ export class PgAgentStore implements AgentStore {
       const { rows } = await db.query(
         `INSERT INTO steps (run_id, conversation_id, role, content, tool_name, tool_args, tool_call_id, result, latency_ms, input_tokens, output_tokens, cached_input_tokens)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
-        [s.runId, s.conversationId, s.role, s.content ?? null, s.toolName ?? null,
-         s.toolArgs === undefined ? null : JSON.stringify(s.toolArgs), s.toolCallId ?? null,
-         s.result === undefined ? null : JSON.stringify(s.result), s.latencyMs ?? null, s.inputTokens ?? null, s.outputTokens ?? null, s.cachedInputTokens ?? null],
+        [
+          s.runId,
+          s.conversationId,
+          s.role,
+          s.content ?? null,
+          s.toolName ?? null,
+          s.toolArgs === undefined ? null : JSON.stringify(s.toolArgs),
+          s.toolCallId ?? null,
+          s.result === undefined ? null : JSON.stringify(s.result),
+          s.latencyMs ?? null,
+          s.inputTokens ?? null,
+          s.outputTokens ?? null,
+          s.cachedInputTokens ?? null,
+        ],
       );
       await this.publish(db, s.conversationId, 'trace');
       return camel<Step>(rows[0]);
@@ -235,8 +268,15 @@ export class PgAgentStore implements AgentStore {
       );
       const action = camel<Action>(rows[0]);
       await this.insertEvent(db, {
-        kind: 'requested', actionId: action.id, runId: a.runId, conversationId: a.conversationId, actorType: 'policy',
-        toolName: a.toolName, toolArgs: a.toolArgs, rule: a.policy?.rule, detail: a.policy?.detail,
+        kind: 'requested',
+        actionId: action.id,
+        runId: a.runId,
+        conversationId: a.conversationId,
+        actorType: 'policy',
+        toolName: a.toolName,
+        toolArgs: a.toolArgs,
+        rule: a.policy?.rule,
+        detail: a.policy?.detail,
       });
       await this.publish(db, a.conversationId, 'trace', 'approvals');
       return action;
@@ -249,7 +289,9 @@ export class PgAgentStore implements AgentStore {
   }
 
   async decideAction(
-    id: string, status: 'approved' | 'rejected', note?: string,
+    id: string,
+    status: 'approved' | 'rejected',
+    note?: string,
     audit: DecisionAudit = { kind: status, actorType: 'reviewer' },
   ): Promise<Action | null> {
     return this.inTx(async (db) => {
@@ -261,8 +303,15 @@ export class PgAgentStore implements AgentStore {
       if (!rows[0]) return null;
       const action = camel<Action>(rows[0]);
       await this.insertEvent(db, {
-        kind: audit.kind, actionId: id, runId: action.runId, conversationId: action.conversationId, actorType: audit.actorType,
-        actorId: audit.actorId, toolName: action.toolName, toolArgs: action.toolArgs, note,
+        kind: audit.kind,
+        actionId: id,
+        runId: action.runId,
+        conversationId: action.conversationId,
+        actorType: audit.actorType,
+        actorId: audit.actorId,
+        toolName: action.toolName,
+        toolArgs: action.toolArgs,
+        note,
       });
       await this.publish(db, action.conversationId, 'trace', 'approvals');
       return action;
@@ -276,21 +325,33 @@ export class PgAgentStore implements AgentStore {
       const { rows } = await db.query('SELECT * FROM actions WHERE id = $1 FOR UPDATE', [actionId]);
       if (!rows[0] || rows[0].status !== 'pending_approval') return null;
       const action = camel<Action>(rows[0]);
-      const counted = async () => (await db.query(
-        `SELECT count(*)::int AS n FROM action_approvals aa JOIN reviewers r ON r.id = aa.reviewer_id
-          WHERE aa.action_id = $1 AND r.active`, [actionId],
-      )).rows[0].n as number;
+      const counted = async () =>
+        (
+          await db.query(
+            `SELECT count(*)::int AS n FROM action_approvals aa JOIN reviewers r ON r.id = aa.reviewer_id
+          WHERE aa.action_id = $1 AND r.active`,
+            [actionId],
+          )
+        ).rows[0].n as number;
 
       const { rowCount } = await db.query(
-        'INSERT INTO action_approvals (action_id, reviewer_id, note) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING', [actionId, reviewer.id, note ?? null],
+        'INSERT INTO action_approvals (action_id, reviewer_id, note) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING',
+        [actionId, reviewer.id, note ?? null],
       );
       const given = await counted();
       // A repeat is only a retry once the requirement is already met (the action was reopened after a failed execution).
-      if (rowCount === 0 && given < action.approvalsRequired) throw new ConflictError('You have already approved this', 'ALREADY_APPROVED_BY_YOU');
+      if (rowCount === 0 && given < action.approvalsRequired)
+        throw new ConflictError('You have already approved this', 'ALREADY_APPROVED_BY_YOU');
 
       const base = {
-        actionId, runId: action.runId, conversationId: action.conversationId, actorType: 'reviewer' as const, actorId: reviewer.id,
-        toolName: action.toolName, toolArgs: action.toolArgs, note,
+        actionId,
+        runId: action.runId,
+        conversationId: action.conversationId,
+        actorType: 'reviewer' as const,
+        actorId: reviewer.id,
+        toolName: action.toolName,
+        toolArgs: action.toolArgs,
+        note,
       };
       if (given < action.approvalsRequired) {
         await this.insertEvent(db, { ...base, kind: 'first_approval', detail: { given, required: action.approvalsRequired } });
@@ -298,7 +359,8 @@ export class PgAgentStore implements AgentStore {
         return { action, final: false };
       }
       const { rows: done } = await db.query(
-        `UPDATE actions SET status = 'approved', decision_note = $2, decided_at = now() WHERE id = $1 RETURNING *`, [actionId, note ?? null],
+        `UPDATE actions SET status = 'approved', decision_note = $2, decided_at = now() WHERE id = $1 RETURNING *`,
+        [actionId, note ?? null],
       );
       await this.insertEvent(db, { ...base, kind: 'approved' });
       await this.publish(db, action.conversationId, 'trace', 'approvals');
@@ -310,8 +372,19 @@ export class PgAgentStore implements AgentStore {
     const { rows } = await db.query(
       `INSERT INTO approval_events (kind, action_id, run_id, conversation_id, actor_type, actor_id, tool_name, tool_args, rule, detail, note)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
-      [e.kind, e.actionId ?? null, e.runId, e.conversationId, e.actorType, e.actorId ?? null, e.toolName,
-       JSON.stringify(e.toolArgs), e.rule ?? null, e.detail ? JSON.stringify(e.detail) : null, e.note ?? null],
+      [
+        e.kind,
+        e.actionId ?? null,
+        e.runId,
+        e.conversationId,
+        e.actorType,
+        e.actorId ?? null,
+        e.toolName,
+        JSON.stringify(e.toolArgs),
+        e.rule ?? null,
+        e.detail ? JSON.stringify(e.detail) : null,
+        e.note ?? null,
+      ],
     );
     await this.publish(db, e.conversationId, 'audit');
     return { ...camel<ApprovalEvent>(rows[0]), actorName: null }; // names are joined when listing, not when writing
@@ -364,7 +437,10 @@ export class PgAgentStore implements AgentStore {
 
   async setActionResult(id: string, result: unknown): Promise<void> {
     await this.inTx(async (db) => {
-      const { rows } = await db.query('UPDATE actions SET result = $2 WHERE id = $1 RETURNING conversation_id', [id, JSON.stringify(result)]);
+      const { rows } = await db.query('UPDATE actions SET result = $2 WHERE id = $1 RETURNING conversation_id', [
+        id,
+        JSON.stringify(result),
+      ]);
       if (rows[0]) await this.publish(db, rows[0].conversation_id, 'trace', 'approvals');
     });
   }
@@ -389,19 +465,24 @@ export class PgAgentStore implements AgentStore {
       [limit],
     );
     return rows.map((r) => ({
-      id: r.id, toolName: r.tool_name, toolArgs: r.tool_args, createdAt: new Date(r.created_at).toISOString(), rule: r.rule ?? null,
+      id: r.id,
+      toolName: r.tool_name,
+      toolArgs: r.tool_args,
+      createdAt: new Date(r.created_at).toISOString(),
+      rule: r.rule ?? null,
     }));
   }
 
   /** Undoes a claim for rows whose notification was never started, so they are announced later. Decided rows are left alone. */
   async releaseClaims(ids: string[]): Promise<void> {
     if (ids.length === 0) return;
-    await this.pool.query(
-      "UPDATE actions SET notified_at = NULL WHERE id = ANY($1::uuid[]) AND status = 'pending_approval'", [ids]);
+    await this.pool.query("UPDATE actions SET notified_at = NULL WHERE id = ANY($1::uuid[]) AND status = 'pending_approval'", [ids]);
   }
 
   async listActions(status?: ActionStatus): Promise<Action[]> {
-    const { rows } = await this.pool.query('SELECT * FROM actions WHERE ($1::text IS NULL OR status = $1) ORDER BY created_at DESC', [status ?? null]);
+    const { rows } = await this.pool.query('SELECT * FROM actions WHERE ($1::text IS NULL OR status = $1) ORDER BY created_at DESC', [
+      status ?? null,
+    ]);
     return rows.map((r) => camel<Action>(r));
   }
 

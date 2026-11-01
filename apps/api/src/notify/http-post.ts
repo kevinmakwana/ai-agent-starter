@@ -20,6 +20,10 @@ export async function postJson(
     if (res.status < 200 || res.status >= 300) throw new Error(`HTTP ${res.status}`);
   } finally {
     // Free the connection; the body is never read.
-    try { await res.body?.cancel(); } catch { /* nothing to free */ }
+    try {
+      await res.body?.cancel();
+    } catch {
+      /* nothing to free */
+    }
   }
 }

@@ -16,8 +16,14 @@ export default function LoginPage() {
     started.current = true;
     const token = readLoginToken(window.location.hash);
     history.replaceState(null, '', window.location.pathname); // the token leaves the address bar first
-    if (!token) { setFailed(true); return; }
-    api.customerVerify(token).then(() => router.replace('/')).catch(() => setFailed(true));
+    if (!token) {
+      setFailed(true);
+      return;
+    }
+    api
+      .customerVerify(token)
+      .then(() => router.replace('/'))
+      .catch(() => setFailed(true));
   }, [router]);
 
   return (
@@ -27,7 +33,9 @@ export default function LoginPage() {
           <>
             <h1>This link did not work</h1>
             <p className="muted">It may have expired or already been used. Request a new one.</p>
-            <button className="btn primary" onClick={() => router.replace('/')}>Back to sign in</button>
+            <button className="btn primary" onClick={() => router.replace('/')}>
+              Back to sign in
+            </button>
           </>
         ) : (
           <h1>Signing you in…</h1>

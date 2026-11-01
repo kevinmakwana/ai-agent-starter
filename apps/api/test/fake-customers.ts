@@ -1,9 +1,18 @@
-import {
-  CUSTOMER_IDLE_HOURS, type CustomerAuthStore, type CustomerIdentity,
-} from '../src/auth/customer.store';
+import { CUSTOMER_IDLE_HOURS, type CustomerAuthStore, type CustomerIdentity } from '../src/auth/customer.store';
 
-interface Link { customerId: number; hash: string; createdAt: number; expiresAt: number; usedAt: number | null }
-interface Session { customerId: number; createdAt: number; lastSeenAt: number; expiresAt: number }
+interface Link {
+  customerId: number;
+  hash: string;
+  createdAt: number;
+  expiresAt: number;
+  usedAt: number | null;
+}
+interface Session {
+  customerId: number;
+  createdAt: number;
+  lastSeenAt: number;
+  expiresAt: number;
+}
 
 /** In-memory CustomerAuthStore for unit tests; `now` is injectable so expiry needs no sleeping. */
 export class MemoryCustomerAuthStore implements CustomerAuthStore {
@@ -48,7 +57,9 @@ export class MemoryCustomerAuthStore implements CustomerAuthStore {
     return this.customers.find((c) => c.id === s.customerId) ?? null;
   }
 
-  async deleteSession(hash: string) { this.sessions.delete(hash); }
+  async deleteSession(hash: string) {
+    this.sessions.delete(hash);
+  }
 
   async deleteSessionsForCustomer(customerId: number) {
     for (const [h, s] of this.sessions) if (s.customerId === customerId) this.sessions.delete(h);
@@ -56,6 +67,7 @@ export class MemoryCustomerAuthStore implements CustomerAuthStore {
 
   async deleteExpired() {
     const t = this.now();
-    for (const [h, s] of this.sessions) if (s.expiresAt <= t || s.lastSeenAt <= t - CUSTOMER_IDLE_HOURS * 3_600_000) this.sessions.delete(h);
+    for (const [h, s] of this.sessions)
+      if (s.expiresAt <= t || s.lastSeenAt <= t - CUSTOMER_IDLE_HOURS * 3_600_000) this.sessions.delete(h);
   }
 }

@@ -23,11 +23,15 @@ describe('createLoginMailer', () => {
     const transport = jsonTransport();
     const authError = Object.assign(new Error('535 auth failed for ava@example.com via smtp://u:p@host'), { code: 'EAUTH' });
     jest.spyOn(transport, 'sendMail').mockImplementation(() => Promise.reject(authError));
-    const err = await createLoginMailer({ ...options, transport }).sendLink('ava@example.com', link, 15).catch((e) => e);
+    const err = await createLoginMailer({ ...options, transport })
+      .sendLink('ava@example.com', link, 15)
+      .catch((e) => e);
     expect(err.message).toBe('login email failed (EAUTH)');
     expect(err.code).toBe('EAUTH'); // so the caller can log the code without parsing the message
     jest.spyOn(transport, 'sendMail').mockImplementation(() => Promise.reject(new Error('boom with ava@example.com')));
-    const plain = await createLoginMailer({ ...options, transport }).sendLink('ava@example.com', link, 15).catch((e) => e);
+    const plain = await createLoginMailer({ ...options, transport })
+      .sendLink('ava@example.com', link, 15)
+      .catch((e) => e);
     expect(plain.message).toBe('login email failed');
   });
 
@@ -42,9 +46,15 @@ describe('createLoginMailer', () => {
     const spy = jest.spyOn(nodemailer, 'createTransport');
     try {
       createLoginMailer(options);
-      expect(spy).toHaveBeenCalledWith(expect.objectContaining({
-        url: options.smtpUrl, connectionTimeout: 5000, greetingTimeout: 5000, socketTimeout: 5000, requireTLS: true,
-      }));
+      expect(spy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          url: options.smtpUrl,
+          connectionTimeout: 5000,
+          greetingTimeout: 5000,
+          socketTimeout: 5000,
+          requireTLS: true,
+        }),
+      );
       const built = spy.mock.calls[0][0] as Record<string, unknown>;
       expect(built.logger).toBeUndefined();
       expect(built.debug).toBeUndefined();

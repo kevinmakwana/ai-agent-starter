@@ -1,8 +1,15 @@
 import { approvalForCaller } from './run-view';
 
 const approval = {
-  id: 'a1', status: 'pending_approval', policyRule: 'always_review', policyDetail: { x: 1 }, notifiedAt: 'now',
-  approvalsRequired: 2, approvalsGiven: 1, approvedBy: ['Alice'], approvedByIds: ['r1'],
+  id: 'a1',
+  status: 'pending_approval',
+  policyRule: 'always_review',
+  policyDetail: { x: 1 },
+  notifiedAt: 'now',
+  approvalsRequired: 2,
+  approvalsGiven: 1,
+  approvedBy: ['Alice'],
+  approvedByIds: ['r1'],
 };
 
 describe('approvalForCaller', () => {

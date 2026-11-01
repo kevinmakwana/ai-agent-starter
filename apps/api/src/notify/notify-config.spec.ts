@@ -22,8 +22,13 @@ describe('loadNotifyConfig', () => {
 
   it('treats empty values (as in a copied .env.example) as unset', () => {
     const cfg = loadNotifyConfig({
-      NOTIFY_WEBHOOK_URL: '', NOTIFY_WEBHOOK_SECRET: '', NOTIFY_SLACK_WEBHOOK_URL: '',
-      NOTIFY_SMTP_URL: '', NOTIFY_EMAIL_FROM: '', NOTIFY_EMAIL_TO: '', REVIEWER_CONSOLE_URL: '',
+      NOTIFY_WEBHOOK_URL: '',
+      NOTIFY_WEBHOOK_SECRET: '',
+      NOTIFY_SLACK_WEBHOOK_URL: '',
+      NOTIFY_SMTP_URL: '',
+      NOTIFY_EMAIL_FROM: '',
+      NOTIFY_EMAIL_TO: '',
+      REVIEWER_CONSOLE_URL: '',
     });
     expect(cfg).toEqual({ consoleUrl: CONSOLE });
   });
@@ -143,21 +148,19 @@ describe('loadNotifyConfig', () => {
       expect(msg).not.toContain('u:p');
     });
 
-    it.each([
-      'a@example.com\nBcc: x@y.z',
-      'a b@example.com',
-      'nobody',
-      'a@example.com, nobody',
-      ' , ',
-    ])('rejects bad recipients %j', (to) => {
-      const msg = errorOf({ ...full, NOTIFY_EMAIL_TO: to });
-      expect(msg).toContain('NOTIFY_EMAIL_TO');
-      expect(msg).not.toContain('Bcc');
-    });
+    it.each(['a@example.com\nBcc: x@y.z', 'a b@example.com', 'nobody', 'a@example.com, nobody', ' , '])(
+      'rejects bad recipients %j',
+      (to) => {
+        const msg = errorOf({ ...full, NOTIFY_EMAIL_TO: to });
+        expect(msg).toContain('NOTIFY_EMAIL_TO');
+        expect(msg).not.toContain('Bcc');
+      },
+    );
 
     it('accepts an uppercase scheme and host', () => {
-      expect(loadNotifyConfig({ ...full, NOTIFY_SMTP_URL: 'SMTPS://U:P@SMTP.Example.COM:465' }).email?.smtpUrl)
-        .toBe('SMTPS://U:P@SMTP.Example.COM:465');
+      expect(loadNotifyConfig({ ...full, NOTIFY_SMTP_URL: 'SMTPS://U:P@SMTP.Example.COM:465' }).email?.smtpUrl).toBe(
+        'SMTPS://U:P@SMTP.Example.COM:465',
+      );
     });
 
     it('accepts credentials with percent-encoded special characters', () => {
@@ -191,14 +194,20 @@ describe('loadNotifyConfig', () => {
     });
 
     it('trims the SMTP URL and the addresses', () => {
-      const cfg = loadNotifyConfig({ ...full, NOTIFY_SMTP_URL: ' smtps://u:p@smtp.example.com:465 ', NOTIFY_EMAIL_FROM: ' alerts@example.com ' });
+      const cfg = loadNotifyConfig({
+        ...full,
+        NOTIFY_SMTP_URL: ' smtps://u:p@smtp.example.com:465 ',
+        NOTIFY_EMAIL_FROM: ' alerts@example.com ',
+      });
       expect(cfg.email?.smtpUrl).toBe('smtps://u:p@smtp.example.com:465');
       expect(cfg.email?.from).toBe('alerts@example.com');
     });
 
     it('ignores a trailing comma in the recipient list', () => {
-      expect(loadNotifyConfig({ ...full, NOTIFY_EMAIL_TO: 'a@example.com, b@example.com,' }).email?.to)
-        .toEqual(['a@example.com', 'b@example.com']);
+      expect(loadNotifyConfig({ ...full, NOTIFY_EMAIL_TO: 'a@example.com, b@example.com,' }).email?.to).toEqual([
+        'a@example.com',
+        'b@example.com',
+      ]);
     });
 
     it('rejects a bad sender address', () => {
@@ -210,18 +219,22 @@ describe('loadNotifyConfig', () => {
 
   describe('REVIEWER_CONSOLE_URL', () => {
     it('overrides the default link', () => {
-      expect(loadNotifyConfig({ REVIEWER_CONSOLE_URL: 'https://support.example.com/reviewer' }).consoleUrl)
-        .toBe('https://support.example.com/reviewer');
+      expect(loadNotifyConfig({ REVIEWER_CONSOLE_URL: 'https://support.example.com/reviewer' }).consoleUrl).toBe(
+        'https://support.example.com/reviewer',
+      );
     });
 
     it('accepts an uppercase scheme and host', () => {
-      expect(loadNotifyConfig({ REVIEWER_CONSOLE_URL: 'HTTPS://Support.Example.com/reviewer' }).consoleUrl)
-        .toBe('HTTPS://Support.Example.com/reviewer');
+      expect(loadNotifyConfig({ REVIEWER_CONSOLE_URL: 'HTTPS://Support.Example.com/reviewer' }).consoleUrl).toBe(
+        'HTTPS://Support.Example.com/reviewer',
+      );
     });
 
     it('treats a whitespace-only value as unset and trims a padded one', () => {
       expect(loadNotifyConfig({ REVIEWER_CONSOLE_URL: '   ' }).consoleUrl).toBe(CONSOLE);
-      expect(loadNotifyConfig({ REVIEWER_CONSOLE_URL: ' https://support.example.com/r ' }).consoleUrl).toBe('https://support.example.com/r');
+      expect(loadNotifyConfig({ REVIEWER_CONSOLE_URL: ' https://support.example.com/r ' }).consoleUrl).toBe(
+        'https://support.example.com/r',
+      );
     });
 
     it('rejects embedded credentials without echoing them', () => {

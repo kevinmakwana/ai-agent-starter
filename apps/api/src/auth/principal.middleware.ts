@@ -6,7 +6,10 @@ import { CustomerAuthService } from './customer-auth.service';
 /** Runs before every route so guards, controllers and SSE streams all read the same `req.principal`. */
 @Injectable()
 export class PrincipalMiddleware implements NestMiddleware {
-  constructor(private readonly auth: AuthService, private readonly customers: CustomerAuthService) {}
+  constructor(
+    private readonly auth: AuthService,
+    private readonly customers: CustomerAuthService,
+  ) {}
 
   async use(req: Request, _res: Response, next: NextFunction) {
     let principal = await this.auth.resolvePrincipal(req);

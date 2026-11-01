@@ -9,6 +9,8 @@ export function abortable<T>(signal: AbortSignal, work: () => Promise<T>): Promi
     const onAbort = () => reject(new Error('timed out'));
     signal.addEventListener('abort', onAbort, { once: true });
     // A late rejection of abandoned work lands on an already-settled promise, so it is not left unhandled.
-    work().then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort));
+    work()
+      .then(resolve, reject)
+      .finally(() => signal.removeEventListener('abort', onAbort));
   });
 }

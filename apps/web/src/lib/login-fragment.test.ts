@@ -10,7 +10,18 @@ describe('readLoginToken', () => {
   });
 
   it('returns null for anything else: no fragment, other keys, extra parts, odd characters, too short or too long', () => {
-    for (const hash of ['', '#', '#token=', '#tok=abc', `#token=${TOKEN}&x=1`, `#token=${TOKEN}/`, '#token=short', `#token=${'a'.repeat(600)}`, `token=${TOKEN}`, '#token=has space-has space-has space']) {
+    for (const hash of [
+      '',
+      '#',
+      '#token=',
+      '#tok=abc',
+      `#token=${TOKEN}&x=1`,
+      `#token=${TOKEN}/`,
+      '#token=short',
+      `#token=${'a'.repeat(600)}`,
+      `token=${TOKEN}`,
+      '#token=has space-has space-has space',
+    ]) {
       assert.equal(readLoginToken(hash), null, hash);
     }
   });

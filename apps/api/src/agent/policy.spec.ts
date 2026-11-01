@@ -7,7 +7,10 @@ const refund = (amount: unknown, priorRefunded: number | undefined, threshold: n
 describe('evaluateApproval for issue_refund', () => {
   it('auto-approves strictly under the threshold and records the numbers it used', () => {
     expect(refund(24.99, 0, 25)).toEqual({
-      mode: 'auto', rule: 'under_threshold', detail: { threshold: 25, priorRefunded: 0, amount: 24.99 }, approvalsRequired: 1,
+      mode: 'auto',
+      rule: 'under_threshold',
+      detail: { threshold: 25, priorRefunded: 0, amount: 24.99 },
+      approvalsRequired: 1,
     });
   });
 
@@ -22,7 +25,12 @@ describe('evaluateApproval for issue_refund', () => {
 
   it('compares in cents, so floating point drift cannot flip the result', () => {
     expect(refund(0.3, 0.1, 0.41)).toMatchObject({ mode: 'auto' }); // 10 + 30 = 40 cents, under 41
-    expect(refund(0.7, 0.1, 0.8)).toEqual({ mode: 'human', rule: 'over_threshold', detail: { threshold: 0.8, priorRefunded: 0.1, amount: 0.7 }, approvalsRequired: 1 }); // 0.1 + 0.7 is 0.7999999999999999 in floats, which would wrongly auto-approve; 80 cents is not under 80
+    expect(refund(0.7, 0.1, 0.8)).toEqual({
+      mode: 'human',
+      rule: 'over_threshold',
+      detail: { threshold: 0.8, priorRefunded: 0.1, amount: 0.7 },
+      approvalsRequired: 1,
+    }); // 0.1 + 0.7 is 0.7999999999999999 in floats, which would wrongly auto-approve; 80 cents is not under 80
   });
 
   it('always reviews when no threshold is set', () => {
@@ -43,7 +51,12 @@ describe('evaluateApproval for issue_refund', () => {
 
 describe('evaluateApproval for other tools', () => {
   it('sends an unknown risky tool to a human', () => {
-    expect(evaluateApproval('delete_everything', { orderId: 1 }, {}, cfg(1000))).toEqual({ mode: 'human', rule: 'default', detail: {}, approvalsRequired: 1 });
+    expect(evaluateApproval('delete_everything', { orderId: 1 }, {}, cfg(1000))).toEqual({
+      mode: 'human',
+      rule: 'default',
+      detail: {},
+      approvalsRequired: 1,
+    });
   });
 });
 
@@ -51,14 +64,20 @@ describe('evaluateApproval for cancel_order', () => {
   it('always goes to a human, whatever the refund threshold', () => {
     for (const threshold of [0, 25, 1_000_000]) {
       expect(evaluateApproval('cancel_order', { orderId: 1, reason: 'changed my mind' }, {}, cfg(threshold))).toEqual({
-        mode: 'human', rule: 'tool_requires_review', detail: {}, approvalsRequired: 1,
+        mode: 'human',
+        rule: 'tool_requires_review',
+        detail: {},
+        approvalsRequired: 1,
       });
     }
   });
 });
 
 describe('evaluateApproval: approvalsRequired (four-eyes)', () => {
-  const eyes = (refundOver: number, cancellations = false): ApprovalPolicyConfig => ({ refundAutoApproveUnder: 0, fourEyes: { refundOver, cancellations } });
+  const eyes = (refundOver: number, cancellations = false): ApprovalPolicyConfig => ({
+    refundAutoApproveUnder: 0,
+    fourEyes: { refundOver, cancellations },
+  });
   const refundWith = (amount: unknown, config: ApprovalPolicyConfig, facts = { priorRefunded: 0 }) =>
     evaluateApproval('issue_refund', { orderId: 1, amount, reason: 'x' }, facts, config);
   const cancel = (config: ApprovalPolicyConfig) => evaluateApproval('cancel_order', { orderId: 1 }, {}, config);
@@ -95,7 +114,12 @@ describe('evaluateApproval: approvalsRequired (four-eyes)', () => {
   });
 
   it('needs two for every cancellation only when the flag is on', () => {
-    expect(cancel(eyes(0, true))).toMatchObject({ mode: 'human', rule: 'tool_requires_review', approvalsRequired: 2, detail: { approvalsRequired: 2 } });
+    expect(cancel(eyes(0, true))).toMatchObject({
+      mode: 'human',
+      rule: 'tool_requires_review',
+      approvalsRequired: 2,
+      detail: { approvalsRequired: 2 },
+    });
     expect(cancel(eyes(0, false))).toMatchObject({ approvalsRequired: 1 });
   });
 

@@ -10,7 +10,10 @@ import { PG_POOL } from '../src/tokens';
 // Runs against a real Postgres; skipped unless E2E_DATABASE_URL is set (CI sets it).
 const maybe = process.env.E2E_DATABASE_URL ? describe : describe.skip;
 
-interface SseEvent { event: string; data: any }
+interface SseEvent {
+  event: string;
+  data: any;
+}
 
 const waitFor = async (cond: () => boolean, ms = 3000) => {
   const deadline = Date.now() + ms;
@@ -49,15 +52,24 @@ maybe('SSE streams (e2e, real Postgres)', () => {
         try {
           for (;;) {
             const { value, done } = await reader.read();
-            if (done) { endedByServer = true; return; }
+            if (done) {
+              endedByServer = true;
+              return;
+            }
             buffer += decoder.decode(value, { stream: true });
             const blocks = buffer.split('\n\n');
             buffer = blocks.pop()!;
             for (const block of blocks) {
               const lines = block.split('\n');
-              const event = lines.find((l) => l.startsWith('event:'))?.slice(6).trim();
+              const event = lines
+                .find((l) => l.startsWith('event:'))
+                ?.slice(6)
+                .trim();
               if (!event) continue; // comment-only block (`: connected`, `: ping`)
-              const data = lines.filter((l) => l.startsWith('data:')).map((l) => l.slice(5).trim()).join('\n');
+              const data = lines
+                .filter((l) => l.startsWith('data:'))
+                .map((l) => l.slice(5).trim())
+                .join('\n');
               events.push({ event, data: JSON.parse(data) });
             }
           }
@@ -69,7 +81,9 @@ maybe('SSE streams (e2e, real Postgres)', () => {
     const stream = {
       res,
       events,
-      get endedByServer() { return endedByServer; },
+      get endedByServer() {
+        return endedByServer;
+      },
       close: async () => {
         ctrl.abort();
         await reading;

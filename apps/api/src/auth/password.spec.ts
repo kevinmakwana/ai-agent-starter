@@ -39,7 +39,11 @@ describe('verifyPassword', () => {
     const stored = await hashPassword(good);
     const [, n, r, p, salt, hash] = stored.split('$');
     const bad = [
-      '', 'garbage', 'scrypt$', 'scrypt$32768$8$1$AAAA', stored.slice(0, 30),
+      '',
+      'garbage',
+      'scrypt$',
+      'scrypt$32768$8$1$AAAA',
+      stored.slice(0, 30),
       `bcrypt$${n}$${r}$${p}$${salt}$${hash}`,
       `scrypt$${n}$${r}$${p}$${salt}$${hash}$extra`,
       `scrypt$abc$${r}$${p}$${salt}$${hash}`,

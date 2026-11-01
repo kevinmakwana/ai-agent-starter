@@ -72,10 +72,16 @@ describe('backoffDelay', () => {
   const full = [1000, 2000, 4000, 8000, 15000, 15000, 15000];
 
   it('doubles per attempt up to the cap', () => {
-    assert.deepEqual([0, 1, 2, 3, 4, 5, 6].map((a) => backoffDelay(a, range, () => 1)), full);
+    assert.deepEqual(
+      [0, 1, 2, 3, 4, 5, 6].map((a) => backoffDelay(a, range, () => 1)),
+      full,
+    );
   });
   it('is half the delay at the bottom of the jitter range', () => {
-    assert.deepEqual([0, 1, 2, 3, 4, 5, 6].map((a) => backoffDelay(a, range, () => 0)), full.map((d) => d / 2));
+    assert.deepEqual(
+      [0, 1, 2, 3, 4, 5, 6].map((a) => backoffDelay(a, range, () => 0)),
+      full.map((d) => d / 2),
+    );
   });
 });
 

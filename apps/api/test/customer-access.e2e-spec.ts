@@ -73,7 +73,9 @@ maybe('customer login: conversation access (e2e, real Postgres)', () => {
       const conv = await start(ava);
       expect(conv).toMatchObject({ customerId: 1, customerName: 'Ava Brooks' });
       expect(conv).not.toHaveProperty('accessToken');
-      expect((await pool.query('SELECT access_token_hash FROM conversations WHERE id = $1', [conv.id])).rows[0].access_token_hash).toBeNull();
+      expect(
+        (await pool.query('SELECT access_token_hash FROM conversations WHERE id = $1', [conv.id])).rows[0].access_token_hash,
+      ).toBeNull();
     });
 
     it('refuses a customerId or email in the body, and anyone who is not a signed-in customer', async () => {
@@ -100,7 +102,12 @@ maybe('customer login: conversation access (e2e, real Postgres)', () => {
       expect(anonymous.body).toEqual(unknown.body);
       await http().post(`/conversations/${conv.id}/messages`).set('Cookie', ben).set(CSRF).send({ content: 'hi' }).expect(401);
       await http().post(`/conversations/${conv.id}/messages`).set('Cookie', ava).send({ content: 'hi' }).expect(403); // CSRF
-      await http().post(`/conversations/${conv.id}/messages`).set('Cookie', ava).set(CSRF).send({ content: 'Show my recent orders' }).expect(201);
+      await http()
+        .post(`/conversations/${conv.id}/messages`)
+        .set('Cookie', ava)
+        .set(CSRF)
+        .send({ content: 'Show my recent orders' })
+        .expect(201);
     });
 
     it('does not accept a conversation token in login mode, even a real one', async () => {
@@ -130,7 +137,7 @@ maybe('customer login: conversation access (e2e, real Postgres)', () => {
   describe('my conversations', () => {
     beforeEach(() => boot());
 
-    it('lists only the caller\'s own, newest first, in the customer shape; anonymous is 401', async () => {
+    it("lists only the caller's own, newest first, in the customer shape; anonymous is 401", async () => {
       const [ava, ben] = [await signIn(1), await signIn(2)];
       const first = await start(ava);
       const second = await start(ava);
@@ -161,7 +168,12 @@ maybe('customer login: conversation access (e2e, real Postgres)', () => {
       for (const path of ['/approvals', '/approvals/events', '/customers', '/conversations', '/events', '/reviewers']) {
         await http().get(path).set('Cookie', ava).expect(401);
       }
-      await http().post('/approvals/00000000-0000-4000-8000-000000000000').set('Cookie', ava).set(CSRF).send({ decision: 'approve' }).expect(401);
+      await http()
+        .post('/approvals/00000000-0000-4000-8000-000000000000')
+        .set('Cookie', ava)
+        .set(CSRF)
+        .send({ decision: 'approve' })
+        .expect(401);
     });
 
     it('sees the customer view of a parked approval; a reviewer sees the policy fields', async () => {
@@ -193,8 +205,17 @@ maybe('customer login: conversation access (e2e, real Postgres)', () => {
     it('a reviewer cookie wins over a customer cookie and sees every conversation', async () => {
       await boot();
       const store: ReviewerStore = app.get(REVIEWER_STORE);
-      await store.createReviewer({ email: 'rev@example.com', name: 'Rev', role: 'reviewer', passwordHash: await hashPassword('correct horse battery') });
-      const login = await http().post('/auth/login').set(CSRF).send({ email: 'rev@example.com', password: 'correct horse battery' }).expect(200);
+      await store.createReviewer({
+        email: 'rev@example.com',
+        name: 'Rev',
+        role: 'reviewer',
+        passwordHash: await hashPassword('correct horse battery'),
+      });
+      const login = await http()
+        .post('/auth/login')
+        .set(CSRF)
+        .send({ email: 'rev@example.com', password: 'correct horse battery' })
+        .expect(200);
       const reviewerCookie = (login.headers['set-cookie'] as unknown as string[])[0].split(';')[0];
       const ava = await signIn(1);
       const conv = await start(ava);

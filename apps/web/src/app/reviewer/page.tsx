@@ -40,13 +40,17 @@ export default function ReviewerConsole() {
 
   useEffect(() => {
     setKey(loadReviewerKey());
-    api.health().then(async (h) => {
-      setProvider(h.provider);
-      let who: Reviewer | null = null;
-      if (h.reviewerAccounts) who = (await api.me().catch(() => null))?.reviewer ?? null;
-      // together, so the console never flashes the login form for an already signed-in reviewer
-      setMe(who); setHealth(h);
-    }).catch(() => setProvider('offline'));
+    api
+      .health()
+      .then(async (h) => {
+        setProvider(h.provider);
+        let who: Reviewer | null = null;
+        if (h.reviewerAccounts) who = (await api.me().catch(() => null))?.reviewer ?? null;
+        // together, so the console never flashes the login form for an already signed-in reviewer
+        setMe(who);
+        setHealth(h);
+      })
+      .catch(() => setProvider('offline'));
   }, []);
 
   const accounts = health?.reviewerAccounts === true;
@@ -57,10 +61,18 @@ export default function ReviewerConsole() {
   /** A 401 means the credential is gone (rejected key, or a session that ended): back to the login form. */
   const handleUnauthorized = () => {
     if (accounts) {
-      setMe(null); setTab('trace'); setSelectedId(null); setDetail(null); setApprovals([]); setConversations([]); setEvents([]);
+      setMe(null);
+      setTab('trace');
+      setSelectedId(null);
+      setDetail(null);
+      setApprovals([]);
+      setConversations([]);
+      setEvents([]);
       setSessionNotice('Your session ended. Sign in again.');
     } else {
-      saveReviewerKey(''); setKey(''); setLoginError('That key was rejected.');
+      saveReviewerKey('');
+      setKey('');
+      setLoginError('That key was rejected.');
     }
   };
 
@@ -83,7 +95,9 @@ export default function ReviewerConsole() {
         tab === 'audit' ? api.approvalEvents(auth) : Promise.resolve(null),
       ]);
       if (listCurrent()) {
-        setConversations(list); setApprovals(apps); setError(null);
+        setConversations(list);
+        setApprovals(apps);
+        setError(null);
         if (evs) setEvents(evs);
       }
       // ...and a detail for a conversation the user has since left is dropped too.
@@ -98,19 +112,24 @@ export default function ReviewerConsole() {
   // One refresh at a time, with a single trailing re-run for whatever arrived meanwhile: every event from any
   // conversation refetches the list and approvals, so this bounds the request rate under a burst. A queued refresh
   // that wants the detail is not downgraded by a later one that does not.
-  const flight = useRef(singleFlight((skipDetail: boolean) => loadRef.current(skipDetail), (queued, next) => queued && next)).current;
+  const flight = useRef(
+    singleFlight(
+      (skipDetail: boolean) => loadRef.current(skipDetail),
+      (queued, next) => queued && next,
+    ),
+  ).current;
   // Changing identity with the inputs is what makes the effect below refetch when the key, selection or tab changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- the extra dependencies are the point
   const refresh = useCallback((skipDetail = false) => flight(skipDetail), [flight, locked, key, me, selectedId, tab]);
 
-  const stream = useEventStream(
-    locked ? null : { path: '/events', auth },
-    (changes) => {
-      const detailAffected = changes.some((c) => c.kind === 'resync' || c.conversationId === selectedIdRef.current);
-      void refresh(!detailAffected);
-    },
-  );
+  const stream = useEventStream(locked ? null : { path: '/events', auth }, (changes) => {
+    const detailAffected = changes.some((c) => c.kind === 'resync' || c.conversationId === selectedIdRef.current);
+    void refresh(!detailAffected);
+  });
 
-  useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
 
   // Poll only while the live stream is not up.
   useEffect(() => {
@@ -122,11 +141,15 @@ export default function ReviewerConsole() {
   const login = (e: React.FormEvent) => {
     e.preventDefault();
     saveReviewerKey(keyInput.trim());
-    setKey(keyInput.trim()); setKeyInput(''); setLoginError(null);
+    setKey(keyInput.trim());
+    setKeyInput('');
+    setLoginError(null);
   };
 
   const decide = async (id: string, decision: 'approve' | 'reject', note: string) => {
-    try { await api.decide(id, decision, note, auth); } catch (e) {
+    try {
+      await api.decide(id, decision, note, auth);
+    } catch (e) {
       if (e instanceof ApiError && e.status === 401) handleUnauthorized();
       else setError(e instanceof Error ? e.message : String(e));
     }
@@ -143,7 +166,14 @@ export default function ReviewerConsole() {
     return (
       <div className="app login">
         <TopBar provider={provider} mode="reviewer" />
-        <LoginForm notice={sessionNotice} onSignedIn={(r) => { setMe(r); setSessionNotice(null); setError(null); }} />
+        <LoginForm
+          notice={sessionNotice}
+          onSignedIn={(r) => {
+            setMe(r);
+            setSessionNotice(null);
+            setError(null);
+          }}
+        />
       </div>
     );
   }
@@ -154,10 +184,21 @@ export default function ReviewerConsole() {
         <TopBar provider={provider} mode="reviewer" />
         <form className="panel login-card" onSubmit={login}>
           <h1>Reviewer sign-in</h1>
-          <p className="muted">This API requires the reviewer key (<code>REVIEWER_API_KEY</code>). It is kept in this tab only.</p>
-          <input type="password" aria-label="Reviewer key" placeholder="Reviewer key" value={keyInput} onChange={(e) => setKeyInput(e.target.value)} autoFocus />
+          <p className="muted">
+            This API requires the reviewer key (<code>REVIEWER_API_KEY</code>). It is kept in this tab only.
+          </p>
+          <input
+            type="password"
+            aria-label="Reviewer key"
+            placeholder="Reviewer key"
+            value={keyInput}
+            onChange={(e) => setKeyInput(e.target.value)}
+            autoFocus
+          />
           {loginError && <div className="notice err">{loginError}</div>}
-          <button className="btn primary" disabled={!keyInput.trim()}>Sign in</button>
+          <button className="btn primary" disabled={!keyInput.trim()}>
+            Sign in
+          </button>
         </form>
       </div>
     );
@@ -167,21 +208,55 @@ export default function ReviewerConsole() {
   return (
     <div className="app">
       <TopBar
-        provider={provider} mode="reviewer" stream={stream}
+        provider={provider}
+        mode="reviewer"
+        stream={stream}
         account={me ? { name: me.name, onLogout: () => void logout(), onChangePassword: () => setChangingPassword(true) } : null}
       />
       {changingPassword && <ChangePassword onClose={() => setChangingPassword(false)} />}
-      <ConversationList conversations={conversations} selectedId={selectedId} onSelect={(id) => { setSelectedId(id); setDetail(null); setTab('trace'); }} />
-      <Chat detail={detail} customer={undefined} sending={false} optimistic={null} error={error} readOnly onReview={() => setTab('approvals')} />
+      <ConversationList
+        conversations={conversations}
+        selectedId={selectedId}
+        onSelect={(id) => {
+          setSelectedId(id);
+          setDetail(null);
+          setTab('trace');
+        }}
+      />
+      <Chat
+        detail={detail}
+        customer={undefined}
+        sending={false}
+        optimistic={null}
+        error={error}
+        readOnly
+        onReview={() => setTab('approvals')}
+      />
       <section className="panel side">
         <div className="tabs" role="tablist">
-          <button role="tab" aria-selected={tab === 'trace'} className={tab === 'trace' ? 'on' : ''} onClick={() => setTab('trace')}>Trace</button>
-          <button role="tab" aria-selected={tab === 'approvals'} className={tab === 'approvals' ? 'on' : ''} onClick={() => setTab('approvals')}>
+          <button role="tab" aria-selected={tab === 'trace'} className={tab === 'trace' ? 'on' : ''} onClick={() => setTab('trace')}>
+            Trace
+          </button>
+          <button
+            role="tab"
+            aria-selected={tab === 'approvals'}
+            className={tab === 'approvals' ? 'on' : ''}
+            onClick={() => setTab('approvals')}
+          >
             Approvals {pendingCount > 0 && <span className="badge">{pendingCount}</span>}
           </button>
-          <button role="tab" aria-selected={tab === 'audit'} className={tab === 'audit' ? 'on' : ''} onClick={() => setTab('audit')}>Audit log</button>
+          <button role="tab" aria-selected={tab === 'audit'} className={tab === 'audit' ? 'on' : ''} onClick={() => setTab('audit')}>
+            Audit log
+          </button>
           {me?.role === 'admin' && (
-            <button role="tab" aria-selected={tab === 'reviewers'} className={tab === 'reviewers' ? 'on' : ''} onClick={() => setTab('reviewers')}>Reviewers</button>
+            <button
+              role="tab"
+              aria-selected={tab === 'reviewers'}
+              className={tab === 'reviewers' ? 'on' : ''}
+              onClick={() => setTab('reviewers')}
+            >
+              Reviewers
+            </button>
           )}
         </div>
         <div className="side-body">

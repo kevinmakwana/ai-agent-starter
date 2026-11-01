@@ -8,14 +8,17 @@ export type AgentEvent = { kind: AgentEventKind; conversationId: string } | { ki
 
 const KINDS: readonly string[] = ['trace', 'approvals', 'audit'];
 
-export const encodeEvent = (kind: AgentEventKind, conversationId: string): string =>
-  JSON.stringify({ kind, conversationId });
+export const encodeEvent = (kind: AgentEventKind, conversationId: string): string => JSON.stringify({ kind, conversationId });
 
 /** Anything malformed (or unknown) is dropped rather than thrown: a bad NOTIFY must never break the listener. */
 export function parseEvent(payload: string | undefined): AgentEvent | null {
   if (!payload) return null;
   let raw: unknown;
-  try { raw = JSON.parse(payload); } catch { return null; }
+  try {
+    raw = JSON.parse(payload);
+  } catch {
+    return null;
+  }
   if (typeof raw !== 'object' || raw === null) return null;
   const { kind, conversationId } = raw as { kind?: unknown; conversationId?: unknown };
   if (typeof kind !== 'string' || !KINDS.includes(kind) || typeof conversationId !== 'string' || !conversationId) return null;

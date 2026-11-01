@@ -15,7 +15,9 @@ export function parseReviewerAddArgs(argv: string[]): ReviewerAddArgs {
   for (let i = 0; i < argv.length; i++) {
     const [flag, inline] = argv[i].split(/=(.*)/s, 2);
     if (PASSWORD_FLAGS.has(flag)) {
-      throw new Error('Do not pass the password as a flag (it would end up in your shell history). Set REVIEWER_PASSWORD or type it at the prompt.');
+      throw new Error(
+        'Do not pass the password as a flag (it would end up in your shell history). Set REVIEWER_PASSWORD or type it at the prompt.',
+      );
     }
     if (flag !== '--email' && flag !== '--name' && flag !== '--role') throw new Error(`Unknown argument "${flag}"`);
     values[flag.slice(2)] = inline ?? argv[++i] ?? '';

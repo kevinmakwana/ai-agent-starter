@@ -15,7 +15,10 @@ export class ApprovalExpiryScheduler implements OnModuleInit, OnApplicationShutd
   private timer?: NodeJS.Timeout;
   private sweeping = false;
 
-  constructor(private readonly expiry: ApprovalExpiry, @Inject(APP_CONFIG) private readonly cfg: AppConfig) {}
+  constructor(
+    private readonly expiry: ApprovalExpiry,
+    @Inject(APP_CONFIG) private readonly cfg: AppConfig,
+  ) {}
 
   onModuleInit() {
     this.timer = setInterval(() => void this.tick(), SWEEP_EVERY_MS);

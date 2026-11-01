@@ -29,7 +29,12 @@ export interface ApprovalDecision {
 const toCents = (n: number) => Math.round(n * 100);
 const isMoney = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && n >= 0;
 
-const human = (rule: ApprovalRule, detail: Record<string, unknown> = {}): ApprovalDecision => ({ mode: 'human', rule, detail, approvalsRequired: 1 });
+const human = (rule: ApprovalRule, detail: Record<string, unknown> = {}): ApprovalDecision => ({
+  mode: 'human',
+  rule,
+  detail,
+  approvalsRequired: 1,
+});
 
 function evaluateRefund(args: unknown, facts: ApprovalFacts, config: ApprovalPolicyConfig): ApprovalDecision {
   const threshold = config.refundAutoApproveUnder;

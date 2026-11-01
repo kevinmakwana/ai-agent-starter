@@ -25,7 +25,11 @@ export function Chat({ detail, customer, sending, optimistic, error, onSend, onR
       <main className="panel chat">
         <div className="placeholder">
           <h1>Acme Shop support agent</h1>
-          <p>{readOnly ? 'Select a conversation to read its transcript and trace.' : 'Start a conversation on the left. The agent answers by calling tools against Postgres; refunds and cancellations may wait for a human.'}</p>
+          <p>
+            {readOnly
+              ? 'Select a conversation to read its transcript and trace.'
+              : 'Start a conversation on the left. The agent answers by calling tools against Postgres; refunds and cancellations may wait for a human.'}
+          </p>
         </div>
       </main>
     );
@@ -43,28 +47,55 @@ export function Chat({ detail, customer, sending, optimistic, error, onSend, onR
     o ? `Show me order #${o === 2 ? 3 : 2}` : 'Show me order #2',
     'Open a ticket: my parcel is late',
   ];
-  const submit = (t: string) => { if (t.trim() && !sending && !paused) { onSend?.(t.trim()); setText(''); } };
+  const submit = (t: string) => {
+    if (t.trim() && !sending && !paused) {
+      onSend?.(t.trim());
+      setText('');
+    }
+  };
 
   return (
     <main className="panel chat">
       <div className="panel-head">
         <h2>{detail.conversation.customerName}</h2>
-        <span className="muted">{detail.conversation.customerEmail} · customer #{detail.conversation.customerId}</span>
+        <span className="muted">
+          {detail.conversation.customerEmail} · customer #{detail.conversation.customerId}
+        </span>
       </div>
       <div className="messages">
-        {runs.flatMap((run) => run.steps.filter((s) => s.role === 'user' || (s.role === 'assistant' && !s.toolName && s.content?.trim())).map((s) => (
-          <div key={s.id} className={`bubble ${s.role}`}>{s.content}</div>
-        )))}
+        {runs.flatMap((run) =>
+          run.steps
+            .filter((s) => s.role === 'user' || (s.role === 'assistant' && !s.toolName && s.content?.trim()))
+            .map((s) => (
+              <div key={s.id} className={`bubble ${s.role}`}>
+                {s.content}
+              </div>
+            )),
+        )}
         {optimistic && !echoed && <div className="bubble user">{optimistic}</div>}
-        {sending && <div className="bubble assistant typing"><i /><i /><i /></div>}
+        {sending && (
+          <div className="bubble assistant typing">
+            <i />
+            <i />
+            <i />
+          </div>
+        )}
         {paused && (
           <div className="notice warn">
             ⏸ A request is waiting for human approval.{' '}
-            {onReview ? <button className="link" onClick={onReview}>Review it →</button> : 'A reviewer will decide shortly.'}
+            {onReview ? (
+              <button className="link" onClick={onReview}>
+                Review it →
+              </button>
+            ) : (
+              'A reviewer will decide shortly.'
+            )}
           </div>
         )}
         {last?.status === 'failed' && (
-          <div className="notice err">{readOnly ? `The run failed: ${last.error}` : 'Sorry, something went wrong on our side. Please try again.'}</div>
+          <div className="notice err">
+            {readOnly ? `The run failed: ${last.error}` : 'Sorry, something went wrong on our side. Please try again.'}
+          </div>
         )}
         {error && <div className="notice err">{error}</div>}
         <div ref={endRef} />
@@ -72,9 +103,19 @@ export function Chat({ detail, customer, sending, optimistic, error, onSend, onR
       {!readOnly && (
         <>
           <div className="suggestions">
-            {suggestions.map((s) => <button key={s} className="chip-btn" disabled={sending || paused} onClick={() => submit(s)}>{s}</button>)}
+            {suggestions.map((s) => (
+              <button key={s} className="chip-btn" disabled={sending || paused} onClick={() => submit(s)}>
+                {s}
+              </button>
+            ))}
           </div>
-          <form className="composer" onSubmit={(e) => { e.preventDefault(); submit(text); }}>
+          <form
+            className="composer"
+            onSubmit={(e) => {
+              e.preventDefault();
+              submit(text);
+            }}
+          >
             <input
               value={text}
               onChange={(e) => setText(e.target.value)}
@@ -82,7 +123,9 @@ export function Chat({ detail, customer, sending, optimistic, error, onSend, onR
               disabled={sending || paused}
               aria-label="Message"
             />
-            <button className="btn primary" disabled={sending || paused || !text.trim()}>Send</button>
+            <button className="btn primary" disabled={sending || paused || !text.trim()}>
+              Send
+            </button>
           </form>
         </>
       )}

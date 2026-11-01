@@ -11,11 +11,13 @@ import { parseReviewerAddArgs, resolvePassword } from './reviewer-add-args';
 function promptHidden(label: string): Promise<string> {
   process.stdout.write(label);
   const rl = createInterface({ input: process.stdin, output: new Writable({ write: (_c, _e, done) => done() }), terminal: true });
-  return new Promise((resolve) => rl.question('', (answer) => {
-    rl.close();
-    process.stdout.write('\n');
-    resolve(answer);
-  }));
+  return new Promise((resolve) =>
+    rl.question('', (answer) => {
+      rl.close();
+      process.stdout.write('\n');
+      resolve(answer);
+    }),
+  );
 }
 
 async function readPassword(): Promise<string> {
@@ -42,6 +44,10 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error(err instanceof ConflictError ? `A reviewer with that email already exists.` : `Could not add the reviewer: ${err instanceof Error ? err.message : err}`);
+  console.error(
+    err instanceof ConflictError
+      ? `A reviewer with that email already exists.`
+      : `Could not add the reviewer: ${err instanceof Error ? err.message : err}`,
+  );
   process.exit(1);
 });

@@ -1,7 +1,22 @@
 import { ConflictError, GuardrailViolation } from '../src/agent/errors';
 import { assertCancellable, assertRefundable, assertSameCustomer } from '../src/agent/guardrails';
 import type {
-  Action, AgentStore, ApprovalEvent, Conversation, Customer, DecisionAudit, NewAction, NewApprovalEvent, NewStep, Order, Run, RunMeta, Shipment, ShopRepo, Step, Ticket,
+  Action,
+  AgentStore,
+  ApprovalEvent,
+  Conversation,
+  Customer,
+  DecisionAudit,
+  NewAction,
+  NewApprovalEvent,
+  NewStep,
+  Order,
+  Run,
+  RunMeta,
+  Shipment,
+  ShopRepo,
+  Step,
+  Ticket,
 } from '../src/agent/types';
 
 export const CUSTOMERS: Customer[] = [
@@ -21,7 +36,11 @@ export class MemoryShop implements ShopRepo {
   orders: Order[] = ORDERS.map((o) => ({ ...o }));
   shipments: Shipment[] = [
     {
-      orderId: 2, carrier: 'UPS', trackingNumber: '1Z999AA10123456784', status: 'in_transit', eta: '2026-01-06T00:00:00.000Z',
+      orderId: 2,
+      carrier: 'UPS',
+      trackingNumber: '1Z999AA10123456784',
+      status: 'in_transit',
+      eta: '2026-01-06T00:00:00.000Z',
       events: [
         { at: '2026-01-02T09:00:00.000Z', location: 'Reno, NV', description: 'Label created' },
         { at: '2026-01-03T14:30:00.000Z', location: 'Reno, NV', description: 'Picked up by carrier' },
@@ -29,7 +48,11 @@ export class MemoryShop implements ShopRepo {
       ],
     },
     {
-      orderId: 1, carrier: 'FedEx', trackingNumber: 'FX900000001', status: 'delivered', eta: '2026-01-04T00:00:00.000Z',
+      orderId: 1,
+      carrier: 'FedEx',
+      trackingNumber: 'FX900000001',
+      status: 'delivered',
+      eta: '2026-01-04T00:00:00.000Z',
       events: [
         { at: '2025-12-28T09:00:00.000Z', location: 'Reno, NV', description: 'Label created' },
         { at: '2025-12-30T11:00:00.000Z', location: 'Denver, CO', description: 'In transit' },
@@ -41,9 +64,15 @@ export class MemoryShop implements ShopRepo {
   refunds: { id: number; orderId: number; amount: number; reason: string; actionId?: string }[] = [];
   tickets: Ticket[] = [];
 
-  async getCustomer(id: number) { return CUSTOMERS.find((c) => c.id === id) ?? null; }
-  async listOrders(customerId: number) { return this.orders.filter((o) => o.customerId === customerId); }
-  async getOrder(id: number) { return this.orders.find((o) => o.id === id) ?? null; }
+  async getCustomer(id: number) {
+    return CUSTOMERS.find((c) => c.id === id) ?? null;
+  }
+  async listOrders(customerId: number) {
+    return this.orders.filter((o) => o.customerId === customerId);
+  }
+  async getOrder(id: number) {
+    return this.orders.find((o) => o.id === id) ?? null;
+  }
   async totalRefunded(orderId: number) {
     return this.refunds.filter((r) => r.orderId === orderId).reduce((s, r) => s + r.amount, 0);
   }
@@ -64,7 +93,9 @@ export class MemoryShop implements ShopRepo {
     this.refunds.push(refund);
     return { refundId: refund.id, refundedTotal: prior + input.amount };
   }
-  async getShipment(orderId: number) { return this.shipments.find((s) => s.orderId === orderId) ?? null; }
+  async getShipment(orderId: number) {
+    return this.shipments.find((s) => s.orderId === orderId) ?? null;
+  }
   async cancelOrder(input: { customerId: number; orderId: number; actionId?: string }) {
     const order = await this.getOrder(input.orderId);
     if (!order) throw new GuardrailViolation('NOT_FOUND', 'no such order');
@@ -91,25 +122,43 @@ export class MemoryStore implements AgentStore {
   addConversation(customerId: number): Conversation {
     const c = CUSTOMERS.find((x) => x.id === customerId)!;
     const conv: Conversation = {
-      id: `conv-${++this.n}`, customerId, customerName: c.name, customerEmail: c.email, title: 't', createdAt: '',
+      id: `conv-${++this.n}`,
+      customerId,
+      customerName: c.name,
+      customerEmail: c.email,
+      title: 't',
+      createdAt: '',
     };
     this.conversations.set(conv.id, conv);
     return conv;
   }
-  async getConversation(id: string) { return this.conversations.get(id) ?? null; }
+  async getConversation(id: string) {
+    return this.conversations.get(id) ?? null;
+  }
   async createRun(conversationId: string, meta: Partial<RunMeta> = {}) {
     const busy = [...this.runs.values()].some(
       (r) => r.conversationId === conversationId && (r.status === 'running' || r.status === 'awaiting_approval'),
     );
     if (busy) throw new ConflictError('This conversation already has a run in progress or waiting for approval.');
     const run: Run = {
-      id: `run-${++this.n}`, conversationId, status: 'running', modelCalls: 0, error: null, createdAt: '', finishedAt: null,
-      provider: meta.provider ?? null, model: meta.model ?? null, promptVersion: meta.promptVersion ?? null,
+      id: `run-${++this.n}`,
+      conversationId,
+      status: 'running',
+      modelCalls: 0,
+      error: null,
+      createdAt: '',
+      finishedAt: null,
+      provider: meta.provider ?? null,
+      model: meta.model ?? null,
+      promptVersion: meta.promptVersion ?? null,
     };
     this.runs.set(run.id, run);
     return { ...run };
   }
-  async getRun(id: string) { const r = this.runs.get(id); return r ? { ...r } : null; }
+  async getRun(id: string) {
+    const r = this.runs.get(id);
+    return r ? { ...r } : null;
+  }
   async updateRun(id: string, patch: Partial<Pick<Run, 'status' | 'modelCalls' | 'error'>>) {
     const run = { ...this.runs.get(id)!, ...Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) };
     this.runs.set(id, run);
@@ -117,14 +166,25 @@ export class MemoryStore implements AgentStore {
   }
   async addStep(s: NewStep) {
     const step: Step = {
-      id: this.steps.length + 1, content: null, toolName: null, toolArgs: null, toolCallId: null, result: null,
-      latencyMs: null, inputTokens: null, outputTokens: null, cachedInputTokens: null, createdAt: '',
+      id: this.steps.length + 1,
+      content: null,
+      toolName: null,
+      toolArgs: null,
+      toolCallId: null,
+      result: null,
+      latencyMs: null,
+      inputTokens: null,
+      outputTokens: null,
+      cachedInputTokens: null,
+      createdAt: '',
       ...(Object.fromEntries(Object.entries(s).filter(([, v]) => v !== undefined)) as object),
     } as Step;
     this.steps.push(step);
     return step;
   }
-  async listSteps(conversationId: string) { return this.steps.filter((s) => s.conversationId === conversationId); }
+  async listSteps(conversationId: string) {
+    return this.steps.filter((s) => s.conversationId === conversationId);
+  }
   async conversationUsage(conversationId: string) {
     const mine = this.steps.filter((x) => x.conversationId === conversationId);
     return {
@@ -134,26 +194,52 @@ export class MemoryStore implements AgentStore {
   }
   async createAction({ policy, approvalsRequired = 1, ...a }: NewAction) {
     const action: Action = {
-      ...a, id: `act-${++this.n}`, status: 'pending_approval', decisionNote: null, result: null, createdAt: '', decidedAt: null, approvalsRequired,
+      ...a,
+      id: `act-${++this.n}`,
+      status: 'pending_approval',
+      decisionNote: null,
+      result: null,
+      createdAt: '',
+      decidedAt: null,
+      approvalsRequired,
     };
     this.actions.set(action.id, action);
     await this.addApprovalEvent({
-      kind: 'requested', actionId: action.id, runId: a.runId, conversationId: a.conversationId, actorType: 'policy',
-      toolName: a.toolName, toolArgs: a.toolArgs, rule: policy?.rule, detail: policy?.detail,
+      kind: 'requested',
+      actionId: action.id,
+      runId: a.runId,
+      conversationId: a.conversationId,
+      actorType: 'policy',
+      toolName: a.toolName,
+      toolArgs: a.toolArgs,
+      rule: policy?.rule,
+      detail: policy?.detail,
     });
     return { ...action };
   }
-  async getAction(id: string) { const a = this.actions.get(id); return a ? { ...a } : null; }
+  async getAction(id: string) {
+    const a = this.actions.get(id);
+    return a ? { ...a } : null;
+  }
   async decideAction(
-    id: string, status: 'approved' | 'rejected', note?: string,
+    id: string,
+    status: 'approved' | 'rejected',
+    note?: string,
     audit: DecisionAudit = { kind: status, actorType: 'reviewer' },
   ) {
     const a = this.actions.get(id);
     if (!a || a.status !== 'pending_approval') return null;
     Object.assign(a, { status, decisionNote: note ?? null, decidedAt: new Date().toISOString() });
     await this.addApprovalEvent({
-      kind: audit.kind, actionId: id, runId: a.runId, conversationId: a.conversationId, actorType: audit.actorType,
-      actorId: audit.actorId, toolName: a.toolName, toolArgs: a.toolArgs, note,
+      kind: audit.kind,
+      actionId: id,
+      runId: a.runId,
+      conversationId: a.conversationId,
+      actorType: audit.actorType,
+      actorId: audit.actorId,
+      toolName: a.toolName,
+      toolArgs: a.toolArgs,
+      note,
     });
     return { ...a };
   }
@@ -165,8 +251,20 @@ export class MemoryStore implements AgentStore {
     const repeat = given.includes(reviewer.id);
     // a repeat is only a retry once the requirement is already met (the action was reopened after a failed execution)
     if (repeat && counted() < a.approvalsRequired) throw new ConflictError('You have already approved this', 'ALREADY_APPROVED_BY_YOU');
-    if (!repeat) { given.push(reviewer.id); this.approvals.set(id, given); }
-    const base = { actionId: id, runId: a.runId, conversationId: a.conversationId, actorType: 'reviewer' as const, actorId: reviewer.id, toolName: a.toolName, toolArgs: a.toolArgs, note };
+    if (!repeat) {
+      given.push(reviewer.id);
+      this.approvals.set(id, given);
+    }
+    const base = {
+      actionId: id,
+      runId: a.runId,
+      conversationId: a.conversationId,
+      actorType: 'reviewer' as const,
+      actorId: reviewer.id,
+      toolName: a.toolName,
+      toolArgs: a.toolArgs,
+      note,
+    };
     if (counted() < a.approvalsRequired) {
       await this.addApprovalEvent({ ...base, kind: 'first_approval', detail: { given: counted(), required: a.approvalsRequired } });
       return { action: { ...a }, final: false };
@@ -177,7 +275,14 @@ export class MemoryStore implements AgentStore {
   }
   async addApprovalEvent(e: NewApprovalEvent) {
     const event: ApprovalEvent = {
-      id: this.events.length + 1, actionId: null, actorId: null, actorName: null, rule: null, detail: null, note: null, createdAt: '',
+      id: this.events.length + 1,
+      actionId: null,
+      actorId: null,
+      actorName: null,
+      rule: null,
+      detail: null,
+      note: null,
+      createdAt: '',
       ...(Object.fromEntries(Object.entries(e).filter(([, v]) => v !== undefined)) as object),
     } as ApprovalEvent;
     this.events.push(event);
@@ -185,7 +290,10 @@ export class MemoryStore implements AgentStore {
   }
   async listApprovalEvents(filter: { conversationId?: string; limit?: number; before?: number } = {}) {
     return this.events
-      .filter((e) => (!filter.conversationId || e.conversationId === filter.conversationId) && (filter.before === undefined || e.id < filter.before))
+      .filter(
+        (e) =>
+          (!filter.conversationId || e.conversationId === filter.conversationId) && (filter.before === undefined || e.id < filter.before),
+      )
       .sort((x, y) => y.id - x.id)
       .slice(0, filter.limit ?? 100);
   }
@@ -196,8 +304,13 @@ export class MemoryStore implements AgentStore {
   }
   async listStrandedActions(decidedBefore: Date) {
     return [...this.actions.values()]
-      .filter((a) => a.status !== 'pending_approval' && a.result === null && Date.parse(a.decidedAt!) < decidedBefore.getTime()
-        && this.runs.get(a.runId)?.status === 'awaiting_approval')
+      .filter(
+        (a) =>
+          a.status !== 'pending_approval' &&
+          a.result === null &&
+          Date.parse(a.decidedAt!) < decidedBefore.getTime() &&
+          this.runs.get(a.runId)?.status === 'awaiting_approval',
+      )
       .map((a) => ({ ...a }));
   }
   async reopenAction(id: string) {
@@ -206,5 +319,7 @@ export class MemoryStore implements AgentStore {
       Object.assign(a, { status: 'pending_approval', decisionNote: null, decidedAt: null });
     }
   }
-  async setActionResult(id: string, result: unknown) { this.actions.get(id)!.result = result; }
+  async setActionResult(id: string, result: unknown) {
+    this.actions.get(id)!.result = result;
+  }
 }

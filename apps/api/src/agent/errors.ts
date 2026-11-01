@@ -2,7 +2,10 @@
 export class NotFoundError extends Error {}
 export class ConflictError extends Error {
   /** A stable machine-readable reason (e.g. `LAST_ADMIN`) that the HTTP layer passes through next to the message. */
-  constructor(message: string, public readonly code?: string) {
+  constructor(
+    message: string,
+    public readonly code?: string,
+  ) {
     super(message);
   }
 }

@@ -20,7 +20,10 @@ export class AnthropicProvider implements ChatProvider {
   }
 
   async complete(messages: ChatMessage[], tools: ToolSpec[]): Promise<Completion> {
-    const system = messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n');
+    const system = messages
+      .filter((m) => m.role === 'system')
+      .map((m) => m.content)
+      .join('\n');
     const res = await fetchWithRetry(
       this.name,
       this.opts.fetch ?? fetch,
@@ -51,12 +54,23 @@ export class AnthropicProvider implements ChatProvider {
       throw new UpstreamLlmError(this.name, 'the response was cut off at the token limit', 'stop_reason=max_tokens; raise LLM_MAX_TOKENS');
     }
     if (data.stop_reason === 'model_context_window_exceeded') {
-      throw new UpstreamLlmError(this.name, 'the response was cut off at the context window', 'stop_reason=model_context_window_exceeded; lower CONTEXT_MAX_TOKENS');
+      throw new UpstreamLlmError(
+        this.name,
+        'the response was cut off at the context window',
+        'stop_reason=model_context_window_exceeded; lower CONTEXT_MAX_TOKENS',
+      );
     }
     if (data.stop_reason === 'refusal') {
-      throw new UpstreamLlmError(this.name, 'the model declined to respond', `stop_reason=refusal ${JSON.stringify(data.stop_details ?? {})}`);
+      throw new UpstreamLlmError(
+        this.name,
+        'the model declined to respond',
+        `stop_reason=refusal ${JSON.stringify(data.stop_details ?? {})}`,
+      );
     }
-    const text = data.content.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n');
+    const text = data.content
+      .filter((b: any) => b.type === 'text')
+      .map((b: any) => b.text)
+      .join('\n');
     return {
       text: text || undefined,
       toolCalls: data.content.filter((b: any) => b.type === 'tool_use').map((b: any) => ({ id: b.id, name: b.name, args: b.input })),

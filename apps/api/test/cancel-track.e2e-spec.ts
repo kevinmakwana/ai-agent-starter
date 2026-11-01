@@ -66,15 +66,25 @@ maybe('cancel_order and track_shipment (e2e, real Postgres)', () => {
       const [approval, ...rest] = await pending();
       expect(rest).toHaveLength(0);
       expect(approval).toMatchObject({
-        toolName: 'cancel_order', status: 'pending_approval', conversationId: id, customerEmail: 'ava.brooks@example.com',
-        toolArgs: { orderId: 11, reason: CANCEL_11 }, orderStatus: 'processing', policyRule: 'tool_requires_review',
+        toolName: 'cancel_order',
+        status: 'pending_approval',
+        conversationId: id,
+        customerEmail: 'ava.brooks@example.com',
+        toolArgs: { orderId: 11, reason: CANCEL_11 },
+        orderStatus: 'processing',
+        policyRule: 'tool_requires_review',
       });
 
       const decided = await http().post(`/approvals/${approval.id}`).send({ decision: 'approve', note: 'ok' }).expect(201);
       expect(decided.body.action.status).toBe('approved');
       expect(decided.body.run.status).toBe('completed');
       expect(seq(decided.body.run.steps)).toEqual([
-        'user:', 'assistant:get_order', 'tool:get_order', 'assistant:cancel_order', 'tool:cancel_order', 'assistant:',
+        'user:',
+        'assistant:get_order',
+        'tool:get_order',
+        'assistant:cancel_order',
+        'tool:cancel_order',
+        'assistant:',
       ]);
       expect(toolResults(decided.body.run.steps, 'cancel_order')).toEqual([{ orderId: 11, status: 'cancelled' }]);
       expect(decided.body.run.steps.at(-1).content).toBe('Order #11 has been cancelled.');
@@ -112,10 +122,21 @@ maybe('cancel_order and track_shipment (e2e, real Postgres)', () => {
 
     it('refuses to cancel what the guardrails protect, and parks nothing', async () => {
       const cases: Array<{ customerId: number; message: string; code: string; error: string; prepare?: string }> = [
-        { customerId: 1, message: 'Cancel order #1', code: 'NOT_CANCELLABLE', error: 'This order is delivered and can no longer be cancelled' },
+        {
+          customerId: 1,
+          message: 'Cancel order #1',
+          code: 'NOT_CANCELLABLE',
+          error: 'This order is delivered and can no longer be cancelled',
+        },
         { customerId: 6, message: 'Cancel order #6', code: 'ALREADY_CANCELLED', error: 'This order is already cancelled.' },
         // order 12 has a prior $10 refund; make it cancellable by status so only the refund stands in the way
-        { customerId: 2, message: 'Cancel order #12', code: 'HAS_REFUNDS', error: 'refunds recorded', prepare: "UPDATE orders SET status = 'processing' WHERE id = 12" },
+        {
+          customerId: 2,
+          message: 'Cancel order #12',
+          code: 'HAS_REFUNDS',
+          error: 'refunds recorded',
+          prepare: "UPDATE orders SET status = 'processing' WHERE id = 12",
+        },
         { customerId: 1, message: 'Cancel order #999', code: 'NOT_FOUND', error: 'Order #999 was not found.' },
       ];
       for (const c of cases) {
@@ -155,7 +176,14 @@ maybe('cancel_order and track_shipment (e2e, real Postgres)', () => {
 
       const run = await say(id, 'Refund order #11');
       expect(run.status).toBe('completed');
-      expect(seq(run.steps)).toEqual(['user:', 'assistant:get_order', 'tool:get_order', 'assistant:issue_refund', 'tool:issue_refund', 'assistant:']);
+      expect(seq(run.steps)).toEqual([
+        'user:',
+        'assistant:get_order',
+        'tool:get_order',
+        'assistant:issue_refund',
+        'tool:issue_refund',
+        'assistant:',
+      ]);
       expect(toolResults(run.steps, 'issue_refund')[0].code).toBe('ORDER_CANCELLED');
       expect(run.steps.at(-1).content).toContain('This order was cancelled and was never charged.');
       expect(await pending()).toHaveLength(0);
@@ -176,8 +204,9 @@ maybe('cancel_order and track_shipment (e2e, real Postgres)', () => {
       await expect(shop.cancelOrder({ customerId: 1, orderId: 11, actionId })).resolves.toEqual({ orderId: 11, status: 'cancelled' });
       expect(await order(11)).toEqual({ status: 'cancelled', cancel_action_id: approval.id });
       // the replay is recognised by the approval id: any other attempt on the cancelled order still fails
-      await expect(shop.cancelOrder({ customerId: 1, orderId: 11, actionId: '22222222-2222-4222-8222-222222222222' }))
-        .rejects.toMatchObject({ code: 'ALREADY_CANCELLED' });
+      await expect(
+        shop.cancelOrder({ customerId: 1, orderId: 11, actionId: '22222222-2222-4222-8222-222222222222' }),
+      ).rejects.toMatchObject({ code: 'ALREADY_CANCELLED' });
       expect(await order(11)).toEqual({ status: 'cancelled', cancel_action_id: approval.id });
 
       await http().post(`/approvals/${approval.id}`).send({ decision: 'approve' }).expect(409);
@@ -197,7 +226,7 @@ maybe('cancel_order and track_shipment (e2e, real Postgres)', () => {
       const control = await newConversation(1);
       const refund = await say(control, 'Order #1 arrived damaged, please refund it');
       expect(refund.status).toBe('completed');
-      expect((await pending())).toHaveLength(0);
+      expect(await pending()).toHaveLength(0);
       expect((await events(control)).map((e) => e.kind)).toEqual(['auto_approved']);
 
       const id = await newConversation(1);
@@ -222,7 +251,11 @@ maybe('cancel_order and track_shipment (e2e, real Postgres)', () => {
       expect(run.status).toBe('completed');
       expect(seq(run.steps)).toEqual(['user:', 'assistant:track_shipment', 'tool:track_shipment', 'assistant:']);
       expect(toolResults(run.steps, 'track_shipment')[0]).toMatchObject({
-        shipped: true, orderId: 2, carrier: 'DHL', trackingNumber: ORDER_2_TRACKING, status: 'in_transit',
+        shipped: true,
+        orderId: 2,
+        carrier: 'DHL',
+        trackingNumber: ORDER_2_TRACKING,
+        status: 'in_transit',
       });
       const answer = run.steps.at(-1).content;
       expect(answer).toContain('shipped with DHL');
@@ -235,7 +268,13 @@ maybe('cancel_order and track_shipment (e2e, real Postgres)', () => {
       const id = await newConversation(1);
       const run = await say(id, 'Where is my order #1?');
       expect(seq(run.steps)).toEqual(['user:', 'assistant:track_shipment', 'tool:track_shipment', 'assistant:']);
-      expect(toolResults(run.steps, 'track_shipment')[0]).toMatchObject({ shipped: true, orderId: 1, carrier: 'FedEx', trackingNumber: 'FX900007919', status: 'delivered' });
+      expect(toolResults(run.steps, 'track_shipment')[0]).toMatchObject({
+        shipped: true,
+        orderId: 1,
+        carrier: 'FedEx',
+        trackingNumber: 'FX900007919',
+        status: 'delivered',
+      });
       expect(run.steps.at(-1).content).toContain('shipped with FedEx (tracking FX900007919): delivered');
       expect(run.steps.at(-1).content).toContain('Latest: Delivered (Front door)');
     });
@@ -285,7 +324,11 @@ maybe('cancel_order and track_shipment (e2e, real Postgres)', () => {
       expect(JSON.stringify(mine)).not.toContain('tool_requires_review');
 
       const theirs = (await http().get(`/conversations/${id}`).set(reviewer).expect(200)).body;
-      expect(theirs.approvals[0]).toMatchObject({ toolName: 'cancel_order', policyRule: 'tool_requires_review', orderStatus: 'processing' });
+      expect(theirs.approvals[0]).toMatchObject({
+        toolName: 'cancel_order',
+        policyRule: 'tool_requires_review',
+        orderStatus: 'processing',
+      });
 
       // the audit log and the approval queue are reviewer-only
       await http().get(`/approvals/events?conversationId=${id}`).set(token).expect(401);

@@ -12,7 +12,11 @@ import type { ChatMessage, ChatProvider } from '../agent/types';
 import { loadConfig, loadRootEnv } from '../config';
 import { createProvider } from './index';
 
-const ORDER = { order: { id: 1, status: 'shipped', total: 18.75, items: [{ name: 'Acme Ceramic Mug', qty: 1 }] }, refundedTotal: 0, refundableRemaining: 18.75 };
+const ORDER = {
+  order: { id: 1, status: 'shipped', total: 18.75, items: [{ name: 'Acme Ceramic Mug', qty: 1 }] },
+  refundedTotal: 0,
+  refundableRemaining: 18.75,
+};
 
 export async function runSmoke(provider: ChatProvider, log: (line: string) => void = console.log): Promise<void> {
   const history: ChatMessage[] = [

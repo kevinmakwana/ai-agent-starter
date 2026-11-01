@@ -20,10 +20,20 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm test -w apps/api && npm test -w apps/web",
     "test:e2e": "npm run test:e2e -w apps/api",
-    "screenshot": "node scripts/screenshot.mjs"
+    "screenshot": "node scripts/screenshot.mjs",
+    "lint": "eslint apps scripts eslint.config.mjs --max-warnings 44",
+    "format": "prettier --write \"apps/**/*.{ts,tsx}\" \"*.mjs\" \"scripts/*.mjs\"",
+    "format:check": "prettier --check \"apps/**/*.{ts,tsx}\" \"*.mjs\" \"scripts/*.mjs\""
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "concurrently": "^10.0.6",
-    "playwright": "^1.64.1"
+    "eslint": "^10.14.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.13.0",
+    "playwright": "^1.64.1",
+    "prettier": "^3.9.10",
+    "typescript-eslint": "^8.72.1"
   }
 }

@@ -3,17 +3,7 @@ import { buildMessages } from './context';
 import { evaluateApproval, type ApprovalPolicyConfig } from './policy';
 import { promptVersion } from './prompt';
 import { toolByName, toolSpecs, validateToolInput, type ToolContext } from './tools';
-import type {
-  Action,
-  AgentStore,
-  ChatProvider,
-  Conversation,
-  DecisionAudit,
-  Run,
-  ShopRepo,
-  NewStep,
-  ToolCall,
-} from './types';
+import type { Action, AgentStore, ChatProvider, Conversation, DecisionAudit, Run, ShopRepo, NewStep, ToolCall } from './types';
 
 export interface RunnerDeps {
   provider: ChatProvider;
@@ -75,7 +65,10 @@ export class AgentRunner {
    * any; shared-key and demo callers pass none, so they cannot give one of two required approvals.
    */
   async decide(
-    actionId: string, decision: 'approve' | 'reject', note?: string, actor: 'reviewer' | 'system' = 'reviewer',
+    actionId: string,
+    decision: 'approve' | 'reject',
+    note?: string,
+    actor: 'reviewer' | 'system' = 'reviewer',
     reviewer?: { id: string; name: string } | null,
   ): Promise<{ action: Action; run: Run }> {
     const { store } = this.deps;
@@ -83,7 +76,11 @@ export class AgentRunner {
     if (!parked) throw new NotFoundError(`Approval ${actionId} not found`);
 
     if (decision === 'approve' && parked.approvalsRequired > 1) {
-      if (!reviewer) throw new ConflictError('This action needs approval from two reviewers; sign in with a reviewer account', 'FOUR_EYES_NEEDS_ACCOUNTS');
+      if (!reviewer)
+        throw new ConflictError(
+          'This action needs approval from two reviewers; sign in with a reviewer account',
+          'FOUR_EYES_NEEDS_ACCOUNTS',
+        );
       const step = await store.approveStep(actionId, reviewer, note);
       if (!step) throw new ConflictError('This approval has already been decided');
       if (!step.final) {
@@ -113,7 +110,8 @@ export class AgentRunner {
     const action = await this.deps.store.getAction(actionId);
     if (!action) throw new NotFoundError(`Approval ${actionId} not found`);
     if (action.status === 'pending_approval' || action.result !== null) throw new ConflictError('This approval is not stranded');
-    if ((await this.deps.store.getRun(action.runId))?.status !== 'awaiting_approval') throw new ConflictError('This run is no longer waiting');
+    if ((await this.deps.store.getRun(action.runId))?.status !== 'awaiting_approval')
+      throw new ConflictError('This run is no longer waiting');
     return this.complete(action, action.status === 'approved' ? 'approve' : 'reject', action.decisionNote ?? undefined);
   }
 
@@ -155,8 +153,13 @@ export class AgentRunner {
     let resumed: Run;
     try {
       await store.addStep({
-        runId: run.id, conversationId: conv.id, role: 'tool', toolName: action.toolName,
-        toolCallId: action.toolCallId, result, latencyMs: Date.now() - started,
+        runId: run.id,
+        conversationId: conv.id,
+        role: 'tool',
+        toolName: action.toolName,
+        toolCallId: action.toolCallId,
+        result,
+        latencyMs: Date.now() - started,
       });
       resumed = await store.updateRun(run.id, { status: 'running' });
     } catch (e) {
@@ -168,9 +171,7 @@ export class AgentRunner {
 
   /** Best effort: the original error is what the caller needs to see. */
   private async fail(run: Run, e: unknown): Promise<void> {
-    await this.deps.store
-      .updateRun(run.id, { status: 'failed', error: e instanceof Error ? e.message : String(e) })
-      .catch(() => undefined);
+    await this.deps.store.updateRun(run.id, { status: 'failed', error: e instanceof Error ? e.message : String(e) }).catch(() => undefined);
   }
 
   private ctx(conv: Conversation): ToolContext {
@@ -192,7 +193,8 @@ export class AgentRunner {
       while (run.modelCalls < this.maxSteps) {
         if (await this.overBudget(conv)) {
           await addStep({
-            ...base, role: 'assistant',
+            ...base,
+            role: 'assistant',
             content: "This conversation has reached its usage limit, so I can't continue here. A human agent will follow up.",
             result: { error: `Token budget of ${this.tokenBudget} reached`, code: 'TOKEN_BUDGET' },
           });
@@ -211,7 +213,14 @@ export class AgentRunner {
 
         if (completion.toolCalls.length === 0 && !completion.text?.trim()) {
           // Keep the billed tokens in the trace, but never store a blank reply: providers reject it on the next call.
-          await addStep({ ...base, role: 'assistant', content: '', result: { error: 'Empty model response', code: 'EMPTY_RESPONSE' }, latencyMs, ...usage });
+          await addStep({
+            ...base,
+            role: 'assistant',
+            content: '',
+            result: { error: 'Empty model response', code: 'EMPTY_RESPONSE' },
+            latencyMs,
+            ...usage,
+          });
           throw new UpstreamLlmError(provider.name, 'the model returned an empty response');
         }
 
@@ -223,9 +232,14 @@ export class AgentRunner {
         // Persist every call of this turn before executing, so history keeps provider ordering.
         for (const [i, call] of completion.toolCalls.entries()) {
           await addStep({
-            ...base, role: 'assistant', content: i === 0 ? (completion.text ?? null) : null,
-            toolName: call.name, toolArgs: call.args, toolCallId: call.id,
-            latencyMs: i === 0 ? latencyMs : null, ...(i === 0 ? usage : {}),
+            ...base,
+            role: 'assistant',
+            content: i === 0 ? (completion.text ?? null) : null,
+            toolName: call.name,
+            toolArgs: call.args,
+            toolCallId: call.id,
+            latencyMs: i === 0 ? latencyMs : null,
+            ...(i === 0 ? usage : {}),
           });
         }
 
@@ -234,27 +248,40 @@ export class AgentRunner {
           const outcome = await this.execute(conv, run.id, call, completion.text ?? '');
           if (outcome.kind === 'pending') {
             await store.createAction({
-              runId: run.id, conversationId: conv.id, toolName: call.name,
-              toolArgs: call.args as Record<string, unknown>, toolCallId: call.id, reasoning: outcome.reasoning,
-              policy: { rule: outcome.rule, detail: outcome.detail }, approvalsRequired: outcome.approvalsRequired,
+              runId: run.id,
+              conversationId: conv.id,
+              toolName: call.name,
+              toolArgs: call.args as Record<string, unknown>,
+              toolCallId: call.id,
+              reasoning: outcome.reasoning,
+              policy: { rule: outcome.rule, detail: outcome.detail },
+              approvalsRequired: outcome.approvalsRequired,
             });
             for (const skipped of completion.toolCalls.slice(i + 1)) {
               await addStep({
-                ...base, role: 'tool', toolName: skipped.name, toolCallId: skipped.id,
+                ...base,
+                role: 'tool',
+                toolName: skipped.name,
+                toolCallId: skipped.id,
                 result: { error: 'Skipped: an earlier action in this turn is awaiting human approval.', code: 'SKIPPED' },
               });
             }
             return store.updateRun(run.id, { status: 'awaiting_approval' });
           }
           await addStep({
-            ...base, role: 'tool', toolName: call.name, toolCallId: call.id,
-            result: outcome.result, latencyMs: Date.now() - t0,
+            ...base,
+            role: 'tool',
+            toolName: call.name,
+            toolCallId: call.id,
+            result: outcome.result,
+            latencyMs: Date.now() - t0,
           });
         }
       }
 
       await addStep({
-        ...base, role: 'assistant',
+        ...base,
+        role: 'assistant',
         content: `I couldn't finish this within ${this.maxSteps} steps. A human agent will follow up.`,
         result: { error: `Step limit of ${this.maxSteps} reached`, code: 'STEP_LIMIT' },
       });
@@ -289,14 +316,23 @@ export class AgentRunner {
         if (decision.mode === 'auto') {
           // The decision is on record before anything happens: if it cannot be written, the tool does not run.
           await this.deps.store.addApprovalEvent({
-            kind: 'auto_approved', runId, conversationId: conv.id, actorType: 'policy', toolName: call.name,
-            toolArgs: call.args as Record<string, unknown>, rule: decision.rule, detail: decision.detail,
+            kind: 'auto_approved',
+            runId,
+            conversationId: conv.id,
+            actorType: 'policy',
+            toolName: call.name,
+            toolArgs: call.args as Record<string, unknown>,
+            rule: decision.rule,
+            detail: decision.detail,
           });
           return { kind: 'result', result: await tool.execute(ctx, call.args) };
         }
         const reason = (call.args as { reason?: string }).reason;
         return {
-          kind: 'pending', rule: decision.rule, detail: decision.detail, approvalsRequired: decision.approvalsRequired,
+          kind: 'pending',
+          rule: decision.rule,
+          detail: decision.detail,
+          approvalsRequired: decision.approvalsRequired,
           reasoning: thought || `The agent requested ${call.name}${reason ? `: ${reason}` : ''}`,
         };
       }

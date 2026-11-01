@@ -42,7 +42,12 @@ describe('four-eyes in the runner', () => {
     expect(shop.refunds).toHaveLength(0);
     expect(store.actions.get(action.id)?.result).toBeNull();
     expect(kinds(store)).toEqual(['requested', 'first_approval']);
-    expect(store.events[1]).toMatchObject({ actorType: 'reviewer', actorId: alice.id, note: 'looks fine', detail: { given: 1, required: 2 } });
+    expect(store.events[1]).toMatchObject({
+      actorType: 'reviewer',
+      actorId: alice.id,
+      note: 'looks fine',
+      detail: { given: 1, required: 2 },
+    });
   });
 
   it('refuses the same reviewer a second time, with a stable code', async () => {

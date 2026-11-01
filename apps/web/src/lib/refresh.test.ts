@@ -5,7 +5,9 @@ import { createLatest, singleFlight } from './refresh';
 /** A promise the test resolves by hand. */
 function deferred() {
   let resolve!: () => void;
-  const promise = new Promise<void>((r) => { resolve = r; });
+  const promise = new Promise<void>((r) => {
+    resolve = r;
+  });
   return { promise, resolve };
 }
 
@@ -48,7 +50,9 @@ describe('singleFlight', () => {
 
   it('runs once for a lone call', async () => {
     const calls: boolean[] = [];
-    const run = singleFlight(async (skip: boolean) => { calls.push(skip); }, or);
+    const run = singleFlight(async (skip: boolean) => {
+      calls.push(skip);
+    }, or);
     await run(true);
     assert.deepEqual(calls, [true]);
   });
@@ -60,7 +64,8 @@ describe('singleFlight', () => {
     let started = 0;
     const run = singleFlight(async (_: boolean) => {
       const gate = gates[started++]!;
-      active++; maxActive = Math.max(maxActive, active);
+      active++;
+      maxActive = Math.max(maxActive, active);
       await gate.promise;
       active--;
     }, or);
@@ -85,10 +90,13 @@ describe('singleFlight', () => {
     const seen: boolean[] = [];
     const gate = deferred();
     let n = 0;
-    const run = singleFlight(async (skipDetail: boolean) => {
-      seen.push(skipDetail);
-      if (n++ === 0) await gate.promise;
-    }, (queued, next) => queued && next); // skipDetail only if every queued call skips it
+    const run = singleFlight(
+      async (skipDetail: boolean) => {
+        seen.push(skipDetail);
+        if (n++ === 0) await gate.promise;
+      },
+      (queued, next) => queued && next,
+    ); // skipDetail only if every queued call skips it
     const first = run(true);
     await tick();
     void run(false); // wants detail
@@ -100,7 +108,9 @@ describe('singleFlight', () => {
 
   it('a call made after the loop finished starts a fresh run', async () => {
     let runs = 0;
-    const run = singleFlight(async (_: boolean) => { runs++; }, or);
+    const run = singleFlight(async (_: boolean) => {
+      runs++;
+    }, or);
     await run(false);
     await run(false);
     assert.equal(runs, 2);
@@ -108,7 +118,9 @@ describe('singleFlight', () => {
 
   it('recovers after fn throws: the next call runs again', async () => {
     let runs = 0;
-    const run = singleFlight(async (_: boolean) => { if (runs++ === 0) throw new Error('boom'); }, or);
+    const run = singleFlight(async (_: boolean) => {
+      if (runs++ === 0) throw new Error('boom');
+    }, or);
     await assert.rejects(run(false), /boom/);
     await run(false);
     assert.equal(runs, 2);

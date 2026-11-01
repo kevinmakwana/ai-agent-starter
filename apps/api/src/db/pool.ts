@@ -12,7 +12,5 @@ export const ensureSchema = (pool: Pool) => pool.query(SCHEMA_SQL);
 
 /** snake_case row -> camelCase object. */
 export function camel<T>(row: Record<string, unknown>): T {
-  return Object.fromEntries(
-    Object.entries(row).map(([k, v]) => [k.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase()), v]),
-  ) as T;
+  return Object.fromEntries(Object.entries(row).map(([k, v]) => [k.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase()), v])) as T;
 }

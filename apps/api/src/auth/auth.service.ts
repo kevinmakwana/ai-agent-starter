@@ -21,7 +21,10 @@ export class AuthService implements OnApplicationBootstrap {
   private warnedDemo = false;
   private warnedKeyIgnored = false;
 
-  constructor(@Inject(REVIEWER_STORE) private readonly store: ReviewerStore, @Inject(APP_CONFIG) private readonly cfg: AppConfig) {}
+  constructor(
+    @Inject(REVIEWER_STORE) private readonly store: ReviewerStore,
+    @Inject(APP_CONFIG) private readonly cfg: AppConfig,
+  ) {}
 
   /**
    * Say so at startup when four-eyes is on but nobody can give an approval yet, and when customer login is on while
@@ -36,10 +39,14 @@ export class AuthService implements OnApplicationBootstrap {
       // a direct read, not hasAnyReviewer(): a one-off startup check must not seed that answer's short cache
       if ((await this.store.listReviewers()).length > 0) return;
       if (fourEyes) {
-        this.log.warn('Four-eyes approval is configured but no reviewer accounts exist: two-approval actions cannot be approved by the shared key or in demo mode. Create one with `npm run reviewer:add -w apps/api`.');
+        this.log.warn(
+          'Four-eyes approval is configured but no reviewer accounts exist: two-approval actions cannot be approved by the shared key or in demo mode. Create one with `npm run reviewer:add -w apps/api`.',
+        );
       }
       if (openReviewerSide) {
-        this.log.warn('Customer login is on but reviewer routes are open (no REVIEWER_API_KEY and no reviewer account): anyone can use /approvals. Create a reviewer with `npm run reviewer:add -w apps/api` or set REVIEWER_API_KEY.');
+        this.log.warn(
+          'Customer login is on but reviewer routes are open (no REVIEWER_API_KEY and no reviewer account): anyone can use /approvals. Create a reviewer with `npm run reviewer:add -w apps/api` or set REVIEWER_API_KEY.',
+        );
       }
     } catch {
       // the first request will report a database problem; the warning is advice only
@@ -58,7 +65,9 @@ export class AuthService implements OnApplicationBootstrap {
         if (!this.cfg.reviewerApiKey) {
           if (!this.warnedDemo) {
             this.warnedDemo = true;
-            this.log.warn('No reviewer accounts and REVIEWER_API_KEY is not set: reviewer routes and all conversations are open (demo mode).');
+            this.log.warn(
+              'No reviewer accounts and REVIEWER_API_KEY is not set: reviewer routes and all conversations are open (demo mode).',
+            );
           }
           return { kind: 'demo' };
         }

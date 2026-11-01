@@ -7,15 +7,26 @@ class FakeConn extends EventEmitter implements ListenConnection {
   ended = false;
   /** How `SELECT 1` behaves: answers, fails, or never answers (a silently dead socket). */
   probe: 'ok' | 'fail' | 'hang' = 'ok';
-  constructor(private readonly failConnect?: Error) { super(); }
-  async connect() { if (this.failConnect) throw this.failConnect; }
+  constructor(private readonly failConnect?: Error) {
+    super();
+  }
+  async connect() {
+    if (this.failConnect) throw this.failConnect;
+  }
   async query(sql: string) {
     this.queries.push(sql);
     if (sql === 'SELECT 1' && this.probe === 'fail') throw new Error('connection terminated');
     if (sql === 'SELECT 1' && this.probe === 'hang') await new Promise(() => undefined);
   }
-  async end() { if (!this.ended) { this.ended = true; this.emit('end'); } }
-  notify(payload: string) { this.emit('notification', { channel: 'agent_events', payload }); }
+  async end() {
+    if (!this.ended) {
+      this.ended = true;
+      this.emit('end');
+    }
+  }
+  notify(payload: string) {
+    this.emit('notification', { channel: 'agent_events', payload });
+  }
 }
 
 const until = async (cond: () => boolean, ms = 1000) => {
@@ -29,7 +40,12 @@ const until = async (cond: () => boolean, ms = 1000) => {
 function makeBus(conns: FakeConn[], heartbeat?: { intervalMs: number; timeoutMs: number }) {
   const errors: unknown[] = [];
   let i = 0;
-  const bus = new StreamBus({ connect: () => conns[Math.min(i++, conns.length - 1)], retryMs: { min: 1, max: 5 }, heartbeat, onError: (e) => errors.push(e) });
+  const bus = new StreamBus({
+    connect: () => conns[Math.min(i++, conns.length - 1)],
+    retryMs: { min: 1, max: 5 },
+    heartbeat,
+    onError: (e) => errors.push(e),
+  });
   return { bus, errors, opened: () => i };
 }
 
@@ -62,7 +78,9 @@ describe('StreamBus', () => {
     const conn = new FakeConn();
     const { bus } = makeBus([conn]);
     const seen: AgentEvent[] = [];
-    bus.subscribe(() => { throw new Error('bad listener'); });
+    bus.subscribe(() => {
+      throw new Error('bad listener');
+    });
     bus.subscribe((e) => seen.push(e));
     await bus.onModuleInit();
     conn.notify(JSON.stringify({ kind: 'trace', conversationId: 'c1' }));
@@ -119,7 +137,9 @@ describe('StreamBus', () => {
     await bus.onModuleInit();
     const calls: string[] = [];
     bus.onClosing(() => calls.push(`a (connection ended: ${conn.ended})`));
-    bus.onClosing(() => { throw new Error('bad closer'); });
+    bus.onClosing(() => {
+      throw new Error('bad closer');
+    });
     const offC = bus.onClosing(() => calls.push('c'));
     offC();
     bus.onClosing(() => calls.push('d'));

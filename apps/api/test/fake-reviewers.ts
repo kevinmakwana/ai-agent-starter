@@ -1,12 +1,27 @@
 import { randomUUID } from 'node:crypto';
 import { ConflictError } from '../src/agent/errors';
 import {
-  IDLE_TIMEOUT_MINUTES, LOCKOUT_AFTER_FAILURES, LOCKOUT_MINUTES,
-  type NewReviewer, type Reviewer, type ReviewerCredentials, type ReviewerPatch, type ReviewerStore, type SessionReviewer,
+  IDLE_TIMEOUT_MINUTES,
+  LOCKOUT_AFTER_FAILURES,
+  LOCKOUT_MINUTES,
+  type NewReviewer,
+  type Reviewer,
+  type ReviewerCredentials,
+  type ReviewerPatch,
+  type ReviewerStore,
+  type SessionReviewer,
 } from '../src/auth/reviewer.store';
 
-interface Row extends Omit<ReviewerCredentials, 'locked'> { failedAttempts: number; lockedUntil: Date | null }
-interface SessionRow { reviewerId: string; createdAt: number; lastSeenAt: number; expiresAt: number }
+interface Row extends Omit<ReviewerCredentials, 'locked'> {
+  failedAttempts: number;
+  lockedUntil: Date | null;
+}
+interface SessionRow {
+  reviewerId: string;
+  createdAt: number;
+  lastSeenAt: number;
+  expiresAt: number;
+}
 
 /** In-memory ReviewerStore for unit tests; `now` is injectable so expiry can be tested without sleeping. */
 export class MemoryReviewerStore implements ReviewerStore {
@@ -15,15 +30,29 @@ export class MemoryReviewerStore implements ReviewerStore {
   now = () => Date.now();
 
   private view = (r: Row): Reviewer => ({
-    id: r.id, email: r.email, name: r.name, role: r.role, active: r.active, createdAt: r.createdAt, lastLoginAt: r.lastLoginAt,
+    id: r.id,
+    email: r.email,
+    name: r.name,
+    role: r.role,
+    active: r.active,
+    createdAt: r.createdAt,
+    lastLoginAt: r.lastLoginAt,
   });
 
   async createReviewer(r: NewReviewer) {
     const email = r.email.toLowerCase();
     if ([...this.rows.values()].some((x) => x.email === email)) throw new ConflictError('A reviewer with this email already exists');
     const row: Row = {
-      id: randomUUID(), email, name: r.name, role: r.role, active: true, createdAt: new Date(this.now()).toISOString(),
-      lastLoginAt: null, passwordHash: r.passwordHash, lockedUntil: null, failedAttempts: 0,
+      id: randomUUID(),
+      email,
+      name: r.name,
+      role: r.role,
+      active: true,
+      createdAt: new Date(this.now()).toISOString(),
+      lastLoginAt: null,
+      passwordHash: r.passwordHash,
+      lockedUntil: null,
+      failedAttempts: 0,
     };
     this.rows.set(row.id, row);
     return this.view(row);
@@ -102,6 +131,7 @@ export class MemoryReviewerStore implements ReviewerStore {
 
   async deleteExpired() {
     const t = this.now();
-    for (const [hash, s] of this.sessions) if (s.expiresAt <= t || s.lastSeenAt <= t - IDLE_TIMEOUT_MINUTES * 60_000) this.sessions.delete(hash);
+    for (const [hash, s] of this.sessions)
+      if (s.expiresAt <= t || s.lastSeenAt <= t - IDLE_TIMEOUT_MINUTES * 60_000) this.sessions.delete(hash);
   }
 }

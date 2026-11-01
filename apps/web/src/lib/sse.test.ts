@@ -19,7 +19,10 @@ describe('SseParser', () => {
     const p = new SseParser();
     const text = 'event: trace\ndata: {"c":"x"}\n\nevent: resync\ndata: {}\n\n';
     const out = [...text].flatMap((ch) => p.push(ch));
-    assert.deepEqual(out, [{ event: 'trace', data: '{"c":"x"}' }, { event: 'resync', data: '{}' }]);
+    assert.deepEqual(out, [
+      { event: 'trace', data: '{"c":"x"}' },
+      { event: 'resync', data: '{}' },
+    ]);
   });
   it('handles CRLF, including a CRLF split across chunks', () => {
     const p = new SseParser();

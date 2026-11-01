@@ -4,8 +4,12 @@ import { Notifier, type NotifierOptions, type NotifyStore } from './notifier';
 import type { Channel, ClaimedAction } from './types';
 
 const row = (id: string, over: Partial<ClaimedAction> = {}): ClaimedAction => ({
-  id, toolName: 'issue_refund', toolArgs: { orderId: 11, amount: 18.75 }, createdAt: '2026-10-29T10:00:00.000Z',
-  rule: 'always_review', ...over,
+  id,
+  toolName: 'issue_refund',
+  toolArgs: { orderId: 11, amount: 18.75 },
+  createdAt: '2026-10-29T10:00:00.000Z',
+  rule: 'always_review',
+  ...over,
 });
 const CONSOLE = 'https://console.example.com/reviewer';
 
@@ -19,7 +23,12 @@ function fakeStore(...batches: ClaimedAction[][]) {
       state.limits.push(limit);
       state.active++;
       state.maxActive = Math.max(state.maxActive, state.active);
-      try { await Promise.resolve(); return queue.shift() ?? []; } finally { state.active--; }
+      try {
+        await Promise.resolve();
+        return queue.shift() ?? [];
+      } finally {
+        state.active--;
+      }
     },
   };
   return { store, state, push: (b: ClaimedAction[]) => queue.push(b) };
@@ -31,9 +40,13 @@ function setup(over: Partial<NotifierOptions> & { channels?: Channel[] } = {}) {
   const sleeps: number[] = [];
   const logs: string[] = [];
   const notifier = new Notifier({
-    store: fakeStore().store, channels: [], consoleUrl: CONSOLE,
+    store: fakeStore().store,
+    channels: [],
+    consoleUrl: CONSOLE,
     log: { warn: (m) => logs.push(m) },
-    sleep: async (ms) => { sleeps.push(ms); },
+    sleep: async (ms) => {
+      sleeps.push(ms);
+    },
     ...over,
   });
   return { notifier, sleeps, logs };
@@ -64,7 +77,12 @@ describe('Notifier delivery', () => {
   });
 
   it('logs one line after three failed attempts, still delivers the other channel and never rejects', async () => {
-    const bad: Channel = { name: 'webhook', send: jest.fn(async () => { throw new Error('HTTP 500'); }) };
+    const bad: Channel = {
+      name: 'webhook',
+      send: jest.fn(async () => {
+        throw new Error('HTTP 500');
+      }),
+    };
     const good = okChannel('slack');
     const { notifier, logs } = setup({ store: fakeStore([row('a1')]).store, channels: [bad, good] });
     await expect(notifier.runOnce()).resolves.toBe(1);
@@ -74,8 +92,15 @@ describe('Notifier delivery', () => {
   });
 
   it('never logs a URL or what follows it, and caps the length', async () => {
-    const send = jest.fn(async () => { throw new Error('POST https://hooks.example.com/SECRET failed'); });
-    const long: Channel = { name: 'email', send: jest.fn(async () => { throw new Error('x'.repeat(500)); }) };
+    const send = jest.fn(async () => {
+      throw new Error('POST https://hooks.example.com/SECRET failed');
+    });
+    const long: Channel = {
+      name: 'email',
+      send: jest.fn(async () => {
+        throw new Error('x'.repeat(500));
+      }),
+    };
     const { notifier, logs } = setup({ store: fakeStore([row('a1')]).store, channels: [{ name: 'webhook', send }, long] });
     await notifier.runOnce();
     expect(logs).toHaveLength(2);
@@ -85,10 +110,14 @@ describe('Notifier delivery', () => {
   });
 
   it('aborts an attempt whose send hangs but honours its signal, and counts it as a failure', async () => {
-    const send = jest.fn((_n, signal: AbortSignal) =>
-      new Promise<void>((_, reject) => signal.addEventListener('abort', () => reject(new Error('aborted')))));
+    const send = jest.fn(
+      (_n, signal: AbortSignal) => new Promise<void>((_, reject) => signal.addEventListener('abort', () => reject(new Error('aborted')))),
+    );
     const { notifier, logs } = setup({
-      store: fakeStore([row('a1')]).store, channels: [{ name: 'webhook', send }], timeoutMs: 20, sleep: async () => {},
+      store: fakeStore([row('a1')]).store,
+      channels: [{ name: 'webhook', send }],
+      timeoutMs: 20,
+      sleep: async () => {},
     });
     await notifier.runOnce();
     expect(send).toHaveBeenCalledTimes(3);
@@ -98,7 +127,10 @@ describe('Notifier delivery', () => {
   it('does not wait forever for a channel that ignores its signal', async () => {
     const send = jest.fn(() => new Promise<void>(() => undefined));
     const { notifier, logs } = setup({
-      store: fakeStore([row('a1')]).store, channels: [{ name: 'webhook', send }], timeoutMs: 20, sleep: async () => {},
+      store: fakeStore([row('a1')]).store,
+      channels: [{ name: 'webhook', send }],
+      timeoutMs: 20,
+      sleep: async () => {},
     });
     await notifier.runOnce();
     expect(send).toHaveBeenCalledTimes(3);
@@ -106,11 +138,19 @@ describe('Notifier delivery', () => {
   });
 
   it('gives a channel its own per-attempt timeout instead of the notifier default', async () => {
-    const send = jest.fn(async () => { await new Promise<void>((resolve) => { setTimeout(resolve, 60).unref(); }); });
+    const send = jest.fn(async () => {
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 60).unref();
+      });
+    });
     const slow: Channel = { name: 'email', timeoutMs: 500, send };
     const fast = { name: 'webhook', send: jest.fn(send) };
     const { notifier, logs } = setup({
-      store: fakeStore([row('a1')]).store, channels: [slow, fast], timeoutMs: 20, backoffMs: [], sleep: async () => {},
+      store: fakeStore([row('a1')]).store,
+      channels: [slow, fast],
+      timeoutMs: 20,
+      backoffMs: [],
+      sleep: async () => {},
     });
     await notifier.runOnce();
     // The 60 ms send outlives the 20 ms default (webhook) but not the 500 ms channel allowance (email).
@@ -120,7 +160,11 @@ describe('Notifier delivery', () => {
   it('uses the notifier timeout when the channel has none', async () => {
     const send = jest.fn(() => new Promise<void>(() => undefined));
     const { notifier, logs } = setup({
-      store: fakeStore([row('a1')]).store, channels: [{ name: 'webhook', send }], timeoutMs: 20, backoffMs: [], sleep: async () => {},
+      store: fakeStore([row('a1')]).store,
+      channels: [{ name: 'webhook', send }],
+      timeoutMs: 20,
+      backoffMs: [],
+      sleep: async () => {},
     });
     await notifier.runOnce();
     expect(logs).toEqual(['Notification via webhook failed for approval a1: timed out']);
@@ -134,7 +178,11 @@ describe('Notifier delivery', () => {
   });
 
   it('logs a failed claim and does not throw', async () => {
-    const store: NotifyStore = { claimUnnotified: async () => { throw new Error('db down'); } };
+    const store: NotifyStore = {
+      claimUnnotified: async () => {
+        throw new Error('db down');
+      },
+    };
     const { notifier, logs } = setup({ store });
     await expect(notifier.runOnce()).resolves.toBe(0);
     expect(logs).toEqual(['Could not check for new approvals: db down']);
@@ -175,8 +223,12 @@ describe('Notifier request() never leaks a rejection', () => {
 
   it('survives a store whose claim throws synchronously or asynchronously', async () => {
     for (const claimUnnotified of [
-      (() => { throw new Error('sync boom'); }) as unknown as NotifyStore['claimUnnotified'],
-      async () => { throw new Error('async boom'); },
+      (() => {
+        throw new Error('sync boom');
+      }) as unknown as NotifyStore['claimUnnotified'],
+      async () => {
+        throw new Error('async boom');
+      },
     ]) {
       const { notifier, logs } = setup({ store: { claimUnnotified } });
       notifier.request();
@@ -187,7 +239,12 @@ describe('Notifier request() never leaks a rejection', () => {
   });
 
   it('survives a channel whose send throws synchronously', async () => {
-    const bad: Channel = { name: 'webhook', send: (() => { throw new Error('sync send'); }) as unknown as Channel['send'] };
+    const bad: Channel = {
+      name: 'webhook',
+      send: (() => {
+        throw new Error('sync send');
+      }) as unknown as Channel['send'],
+    };
     const { notifier, logs } = setup({ store: fakeStore([row('a1')]).store, channels: [bad], backoffMs: [] });
     notifier.request();
     await expect(notifier['running']).resolves.toBeUndefined();
@@ -205,7 +262,12 @@ describe('Notifier release on stop', () => {
   it('releases rows it never started when stop() lands mid-pass, and never the one it attempted', async () => {
     const { store, release } = releasingStore([row('a1'), row('a2'), row('a3')]);
     let stopping: Promise<void> | undefined;
-    const ch: Channel = { name: 'webhook', send: jest.fn(async () => { stopping = notifier.stop(); }) };
+    const ch: Channel = {
+      name: 'webhook',
+      send: jest.fn(async () => {
+        stopping = notifier.stop();
+      }),
+    };
     const { notifier } = setup({ store, channels: [ch] });
     await expect(notifier.runOnce()).resolves.toBe(3);
     await stopping;
@@ -242,7 +304,9 @@ describe('Notifier release on stop', () => {
 
   it('does not release a row whose retries were cut short by stop()', async () => {
     const { store, release } = releasingStore([row('a1')]);
-    const send = jest.fn(async () => { throw new Error('nope'); });
+    const send = jest.fn(async () => {
+      throw new Error('nope');
+    });
     const { notifier } = setup({ store, channels: [{ name: 'webhook', send }], sleep: () => new Promise<void>(() => undefined) });
     const pass = notifier.runOnce();
     await new Promise((r) => setImmediate(r));
@@ -253,7 +317,9 @@ describe('Notifier release on stop', () => {
   });
 
   it('logs a failed release without a URL and does not throw', async () => {
-    const release = jest.fn(async () => { throw new Error('POST https://db.example.com/secret refused'); });
+    const release = jest.fn(async () => {
+      throw new Error('POST https://db.example.com/secret refused');
+    });
     let finishClaim!: (rows: ClaimedAction[]) => void;
     const store: NotifyStore = { claimUnnotified: () => new Promise((r) => (finishClaim = r)), release };
     const { notifier, logs } = setup({ store, channels: [okChannel('webhook')] });
@@ -281,9 +347,16 @@ describe('Notifier triggers', () => {
 
   function fakeBus() {
     let listener: ((e: AgentEvent) => void) | undefined;
-    const unsubscribe = jest.fn(() => { listener = undefined; });
+    const unsubscribe = jest.fn(() => {
+      listener = undefined;
+    });
     return {
-      bus: { subscribe: (l: (e: AgentEvent) => void) => { listener = l; return unsubscribe; } },
+      bus: {
+        subscribe: (l: (e: AgentEvent) => void) => {
+          listener = l;
+          return unsubscribe;
+        },
+      },
       emit: (e: AgentEvent) => listener?.(e),
       unsubscribe,
       subscribed: () => listener !== undefined,
@@ -338,7 +411,12 @@ describe('Notifier triggers', () => {
         calls++;
         active++;
         maxActive = Math.max(maxActive, active);
-        try { if (calls === 1) await new Promise<void>((r) => (release = r)); return []; } finally { active--; }
+        try {
+          if (calls === 1) await new Promise<void>((r) => (release = r));
+          return [];
+        } finally {
+          active--;
+        }
       },
     };
     const { notifier } = setup({ store });
@@ -347,7 +425,10 @@ describe('Notifier triggers', () => {
     await flush();
     expect(calls).toBe(1);
 
-    for (let i = 0; i < 3; i++) { b.emit({ kind: 'approvals', conversationId: 'c' }); await jest.advanceTimersByTimeAsync(250); }
+    for (let i = 0; i < 3; i++) {
+      b.emit({ kind: 'approvals', conversationId: 'c' });
+      await jest.advanceTimersByTimeAsync(250);
+    }
     expect(calls).toBe(1); // still blocked on the first pass
     release();
     await flush();
@@ -379,7 +460,9 @@ describe('Notifier triggers', () => {
   });
 
   it('stop() waits for the pass in flight, makes retries give up, and closes every channel that can close', async () => {
-    const send = jest.fn(async () => { throw new Error('nope'); });
+    const send = jest.fn(async () => {
+      throw new Error('nope');
+    });
     const close = jest.fn();
     const closing: Channel = { name: 'email', send: jest.fn(async () => undefined), close };
     const plain = okChannel('slack');

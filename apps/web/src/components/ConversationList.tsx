@@ -18,9 +18,15 @@ export function ConversationList({ conversations, customers, selectedId, onSelec
   const [email, setEmail] = useState('');
   return (
     <aside className="panel sidebar">
-      <div className="panel-head"><h2>Conversations</h2></div>
+      <div className="panel-head">
+        <h2>Conversations</h2>
+      </div>
       {onNew && (
-        <div className="new-chat single"><button className="btn primary" onClick={onNew}>New conversation</button></div>
+        <div className="new-chat single">
+          <button className="btn primary" onClick={onNew}>
+            New conversation
+          </button>
+        </div>
       )}
       {onCreate && (
         <form
@@ -29,21 +35,36 @@ export function ConversationList({ conversations, customers, selectedId, onSelec
             e.preventDefault();
             if (customers?.length ? customerId : email.trim()) {
               onCreate(customers?.length ? { customerId: customerId as number } : { email: email.trim() });
-              setCustomerId(''); setEmail('');
+              setCustomerId('');
+              setEmail('');
             }
           }}
         >
           {customers === null ? (
-            <select aria-label="Loading customers" disabled><option>Loading…</option></select>
+            <select aria-label="Loading customers" disabled>
+              <option>Loading…</option>
+            </select>
           ) : customers?.length ? (
             <select aria-label="Customer" value={customerId} onChange={(e) => setCustomerId(e.target.value ? Number(e.target.value) : '')}>
               <option value="">Start a chat as…</option>
-              {customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              {customers.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
             </select>
           ) : (
-            <input type="email" aria-label="Your account email" placeholder="Your account email" value={email} onChange={(e) => setEmail(e.target.value)} />
+            <input
+              type="email"
+              aria-label="Your account email"
+              placeholder="Your account email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
           )}
-          <button className="btn primary" disabled={customers === null || (customers?.length ? !customerId : !email.trim())}>New</button>
+          <button className="btn primary" disabled={customers === null || (customers?.length ? !customerId : !email.trim())}>
+            New
+          </button>
         </form>
       )}
       <ul className="conv-list">
