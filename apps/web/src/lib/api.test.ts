@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { afterEach, describe, it } from 'node:test';
+import { afterEach, describe, it } from 'vitest';
 import { api } from './api';
 
 const realFetch = globalThis.fetch;

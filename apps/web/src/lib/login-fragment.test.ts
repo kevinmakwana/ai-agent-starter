@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 import { readLoginToken } from './login-fragment';
 
 const TOKEN = 'abcDEF123_-abcDEF123_-abcDEF123_-abcDEF1234';
