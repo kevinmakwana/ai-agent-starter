@@ -14,6 +14,46 @@ function upstream(response: Response) {
 const headersOf = (init: RequestInit) => new Headers(init.headers);
 const call = (req: Request, path: string[], fetchImpl: typeof fetch) => forwardToApi(req, path, { fetchImpl, apiUrl: 'http://api.test' });
 
+describe('forwardToApi: request id', () => {
+  it('forwards a well-formed id from the browser and hands the API its answer back', async () => {
+    const { seen, fetchImpl } = upstream(Response.json({}, { headers: { 'x-request-id': 'trace-from-api-1' } }));
+    const out = await call(
+      new Request('http://web.test/api/health', { headers: { 'x-request-id': 'trace-abcdef12' } }),
+      ['health'],
+      fetchImpl,
+    );
+    assert.equal(headersOf(seen[0].init).get('x-request-id'), 'trace-abcdef12');
+    assert.equal(out.headers.get('x-request-id'), 'trace-from-api-1');
+  });
+
+  it('generates one when the browser sent none, and replaces a malformed one', async () => {
+    for (const bad of [undefined, 'short', 'has spaces in it', 'a'.repeat(65)]) {
+      const { seen, fetchImpl } = upstream(Response.json({}));
+      const out = await call(
+        new Request('http://web.test/api/health', { headers: bad ? { 'x-request-id': bad } : {} }),
+        ['health'],
+        fetchImpl,
+      );
+      const sent = headersOf(seen[0].init).get('x-request-id');
+      assert.match(sent ?? '', /^[0-9a-f-]{36}$/);
+      assert.equal(out.headers.get('x-request-id'), sent);
+    }
+  });
+
+  it('still returns the id when the API cannot be reached', async () => {
+    const fetchImpl = (async () => {
+      throw new Error('ECONNREFUSED');
+    }) as typeof fetch;
+    const out = await call(
+      new Request('http://web.test/api/health', { headers: { 'x-request-id': 'trace-abcdef12' } }),
+      ['health'],
+      fetchImpl,
+    );
+    assert.equal(out.status, 502);
+    assert.equal(out.headers.get('x-request-id'), 'trace-abcdef12');
+  });
+});
+
 describe('forwardToApi: request', () => {
   it('forwards the session cookie and the CSRF header the page set, plus the existing credentials', async () => {
     const { seen, fetchImpl } = upstream(Response.json({ ok: true }));

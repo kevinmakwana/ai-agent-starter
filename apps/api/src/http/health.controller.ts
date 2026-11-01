@@ -14,13 +14,23 @@ export class HealthController {
     private readonly auth: AuthService,
   ) {}
 
+  /** Liveness: the process is up and serving. Deliberately touches nothing else, so a database outage never gets the process restarted. */
+  @Get('live')
+  live() {
+    return { status: 'ok' };
+  }
+
+  /** Readiness: the API can do its job, which needs the database. 503 while it cannot, so a balancer stops sending traffic. */
+  @Get('ready')
+  async ready() {
+    await this.assertDatabase();
+    return { status: 'ok', db: 'up' };
+  }
+
+  /** The original combined endpoint, unchanged (the web app reads the mode flags from it): readiness plus configuration facts. */
   @Get()
   async check() {
-    try {
-      await this.pool.query('SELECT 1');
-    } catch {
-      throw new ServiceUnavailableException({ status: 'error', db: 'down', provider: this.cfg.provider });
-    }
+    await this.assertDatabase();
     const reviewerAccounts = await this.auth.isAccountsMode();
     return {
       status: 'ok',
@@ -30,5 +40,13 @@ export class HealthController {
       reviewerAccounts,
       customerLogin: this.cfg.customerLogin.enabled,
     };
+  }
+
+  private async assertDatabase() {
+    try {
+      await this.pool.query('SELECT 1');
+    } catch {
+      throw new ServiceUnavailableException({ status: 'error', db: 'down', provider: this.cfg.provider });
+    }
   }
 }

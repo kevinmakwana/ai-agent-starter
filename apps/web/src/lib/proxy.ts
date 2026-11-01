@@ -10,11 +10,18 @@ export interface ProxyDeps {
   apiUrl?: string;
 }
 
+// Same rule as the API's request-id middleware: a well-formed id from the caller is kept, anything else is replaced.
+const VALID_REQUEST_ID = /^[A-Za-z0-9._-]{8,64}$/;
+
 const defaultApiUrl = () => process.env.API_URL ?? `http://localhost:${process.env.API_PORT ?? 3001}`;
 
 export async function forwardToApi(req: Request, path: string[], deps: ProxyDeps = {}): Promise<Response> {
   const { fetchImpl = fetch, apiUrl = defaultApiUrl() } = deps;
   const headers = new Headers();
+  // One id from the browser request to the API's log lines; the browser gets it back as X-Request-Id.
+  const incoming = req.headers.get('x-request-id');
+  const requestId = incoming && VALID_REQUEST_ID.test(incoming) ? incoming : crypto.randomUUID();
+  headers.set('x-request-id', requestId);
   for (const name of FORWARDED) {
     const value = req.headers.get(name);
     if (value) headers.set(name, value);
@@ -30,7 +37,7 @@ export async function forwardToApi(req: Request, path: string[], deps: ProxyDeps
       signal: req.signal,
     });
     const contentType = upstream.headers.get('content-type') ?? 'application/json';
-    const out = new Headers({ 'content-type': contentType });
+    const out = new Headers({ 'content-type': contentType, 'x-request-id': upstream.headers.get('x-request-id') ?? requestId });
     if (contentType.startsWith('text/event-stream')) {
       out.set('cache-control', 'no-cache, no-transform');
       out.set('x-accel-buffering', 'no');
@@ -39,6 +46,9 @@ export async function forwardToApi(req: Request, path: string[], deps: ProxyDeps
     for (const cookie of upstream.headers.getSetCookie()) out.append('set-cookie', cookie);
     return new Response(upstream.body, { status: upstream.status, headers: out });
   } catch {
-    return Response.json({ statusCode: 502, error: 'Bad Gateway', message: 'The API is not reachable' }, { status: 502 });
+    return Response.json(
+      { statusCode: 502, error: 'Bad Gateway', message: 'The API is not reachable' },
+      { status: 502, headers: { 'x-request-id': requestId } },
+    );
   }
 }

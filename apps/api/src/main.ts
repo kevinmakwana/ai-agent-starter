@@ -4,11 +4,12 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { loadConfig, loadRootEnv } from './config';
 import { configureApp } from './http/setup';
+import { StructuredLogger } from './logging/structured-logger';
 
 async function bootstrap() {
   loadRootEnv();
   const cfg = loadConfig();
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { logger: new StructuredLogger(cfg.logFormat) });
   configureApp(app);
   app.enableShutdownHooks();
   await app.listen(cfg.port);
