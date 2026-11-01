@@ -9,10 +9,20 @@ import { runSmoke } from './smoke';
 // Real HTTP round trips (no injected fetch) against a local server that speaks each vendor's wire format.
 // This checks URLs, headers and bodies over an actual socket; it does NOT replace a live-API smoke test.
 
+/** The part of a vendor request body these tests read. */
+interface WireBlock {
+  type: string;
+  id?: string;
+  tool_use_id?: string;
+}
+interface WireMessage {
+  role: string;
+  content: WireBlock[] | string;
+}
 interface Seen {
   url: string;
   headers: IncomingMessage['headers'];
-  body: any;
+  body: { messages: WireMessage[]; tools: unknown[] };
 }
 let server: Server;
 let base: string;
@@ -82,7 +92,7 @@ it('Anthropic adapter: POST /v1/messages with x-api-key, version header and inpu
   expect(seen[0].headers['x-api-key']).toBe('ak-test');
   expect(seen[0].headers['anthropic-version']).toBe('2023-06-01');
   expect(seen[0].body).toMatchObject({ system: 'sys', messages: [{ role: 'user', content: 'where is order 5?' }] });
-  expect(seen[0].body.tools[0].input_schema.type).toBe('object');
+  expect(seen[0].body.tools[0]).toMatchObject({ input_schema: { type: 'object' } });
 });
 
 it('keeps the upstream error body out of the client-facing message', async () => {
@@ -133,16 +143,16 @@ describe('live smoke script (runSmoke), exercised against the local servers', ()
     expect(seen).toHaveLength(2);
     // the second request must replay the tool_use and answer it with a tool_result carrying the same id
     const second = seen[1].body.messages;
-    expect(second.map((m: any) => m.role)).toEqual(['user', 'assistant', 'user']);
-    expect(second[1].content.find((b: any) => b.type === 'tool_use').id).toBe('u1');
-    expect(second[2].content[0]).toMatchObject({ type: 'tool_result', tool_use_id: 'u1' });
+    expect(second.map((m) => m.role)).toEqual(['user', 'assistant', 'user']);
+    expect((second[1].content as WireBlock[]).find((b) => b.type === 'tool_use')?.id).toBe('u1');
+    expect((second[2].content as WireBlock[])[0]).toMatchObject({ type: 'tool_result', tool_use_id: 'u1' });
   });
 
   it('OpenAI: same round trip', async () => {
     reply = (r) => ({ status: 200, body: r.body.messages.length === 2 ? openAiTool : openAiDone });
     await runSmoke(new OpenAiProvider({ apiKey: 'k', model: 'm', baseUrl: `${base}/v1` }), quiet);
     const second = seen[1].body.messages;
-    expect(second.map((m: any) => m.role)).toEqual(['system', 'user', 'assistant', 'tool']);
+    expect(second.map((m) => m.role)).toEqual(['system', 'user', 'assistant', 'tool']);
     expect(second[3]).toMatchObject({ role: 'tool', tool_call_id: 'c1' });
   });
 

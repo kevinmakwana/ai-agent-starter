@@ -50,7 +50,7 @@
 - [x] 5.4 Dockerfiles for API and web; full-stack compose.
 - [ ] 5.5 Real migrations instead of DDL on boot.
 - [x] 5.6 Structured logging with request IDs; liveness/readiness split for `/health`.
-- [ ] 5.7 Remove `any` in tools, provider parsing and web types.
+- [x] 5.7 Remove `any` in tools, provider parsing and web types.
 - [x] 5.8 Eval suite (recorded traces, prompt-injection cases).
 
 ## Portfolio plan

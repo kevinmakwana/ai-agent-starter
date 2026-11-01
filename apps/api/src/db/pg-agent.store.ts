@@ -24,7 +24,7 @@ const hashToken = (token: string) => createHash('sha256').update(token).digest('
 const TERMINAL = ['completed', 'failed', 'step_limit'];
 
 /** Satisfied by both Pool and PoolClient, so an event can be written inside or outside a transaction. */
-type Db = { query: (text: string, values?: unknown[]) => Promise<{ rows: any[] }> };
+type Db = { query: (text: string, values?: unknown[]) => Promise<{ rows: Record<string, unknown>[] }> };
 
 const MAX_EVENTS = 200;
 

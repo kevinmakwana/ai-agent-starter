@@ -7,7 +7,9 @@ export interface ListenConnection {
   connect(): Promise<unknown>;
   query(sql: string): Promise<unknown>;
   end(): Promise<void>;
-  on(event: string, cb: (...args: any[]) => void): unknown;
+  on(event: 'error', cb: (e: Error) => void): unknown;
+  on(event: 'end', cb: () => void): unknown;
+  on(event: 'notification', cb: (m: { payload?: string }) => void): unknown;
 }
 
 /**

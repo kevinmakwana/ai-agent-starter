@@ -15,8 +15,8 @@ const typed = (dir, extra = {}) => ({
     '@typescript-eslint/no-floating-promises': 'error',
     // JSX handlers may return promises; passing an async function where a callback must be synchronous is still flagged.
     '@typescript-eslint/no-misused-promises': ['error', { checksVoidReturn: { attributes: false } }],
-    // Tightened to an error by TODO 5.7 (remove `any` in tools, provider parsing and web types).
-    '@typescript-eslint/no-explicit-any': 'warn',
+    // Network data is `unknown` until narrowed; a needed cast gets a comment naming the invariant that makes it safe.
+    '@typescript-eslint/no-explicit-any': 'error',
     '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
   },
 });

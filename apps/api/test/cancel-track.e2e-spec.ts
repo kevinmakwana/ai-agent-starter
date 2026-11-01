@@ -17,8 +17,14 @@ const CANCEL_11 = 'Cancel order #11, I ordered it by mistake';
 // order 2 ships with carrier index 2 % 4 = DHL and tracking number JD + (900000000 + 2 * 7919)
 const ORDER_2_TRACKING = 'JD900015838';
 
-const seq = (steps: any[]) => steps.map((s) => `${s.role}:${s.toolName ?? ''}`);
-const toolResults = (steps: any[], name: string) => steps.filter((s) => s.role === 'tool' && s.toolName === name).map((s) => s.result);
+interface TraceStep {
+  role: string;
+  toolName?: string;
+  result?: Record<string, unknown>;
+}
+const seq = (steps: TraceStep[]) => steps.map((s) => `${s.role}:${s.toolName ?? ''}`);
+const toolResults = (steps: TraceStep[], name: string) =>
+  steps.filter((s) => s.role === 'tool' && s.toolName === name).map((s) => s.result);
 
 maybe('cancel_order and track_shipment (e2e, real Postgres)', () => {
   let app: INestApplication;
@@ -42,9 +48,12 @@ maybe('cancel_order and track_shipment (e2e, real Postgres)', () => {
   const say = async (id: string, content: string) =>
     (await http().post(`/conversations/${id}/messages`).send({ content }).expect(201)).body.run;
 
-  const pending = async () => (await http().get('/approvals?status=pending').expect(200)).body as any[];
+  const pending = async () =>
+    (await http().get('/approvals?status=pending').expect(200)).body as { id: string; toolName: string; status: string }[];
   const events = async (conversationId: string) =>
-    ((await http().get(`/approvals/events?conversationId=${conversationId}`).expect(200)).body as any[]).reverse(); // oldest first
+    (
+      (await http().get(`/approvals/events?conversationId=${conversationId}`).expect(200)).body as { kind: string; actorType: string }[]
+    ).reverse(); // oldest first
   const order = async (id: number) => (await pool.query('SELECT status, cancel_action_id FROM orders WHERE id = $1', [id])).rows[0];
 
   afterEach(async () => {
@@ -146,7 +155,7 @@ maybe('cancel_order and track_shipment (e2e, real Postgres)', () => {
         expect(run.status).toBe('completed');
         const results = toolResults(run.steps, c.code === 'NOT_FOUND' ? 'get_order' : 'cancel_order');
         expect(results).toHaveLength(1);
-        expect(results[0].code).toBe(c.code);
+        expect(results[0]?.code).toBe(c.code);
         expect(run.steps.at(-1).content).toContain("I wasn't able to do that:");
         expect(run.steps.at(-1).content).toContain(c.error);
         expect(await events(id)).toEqual([]);
@@ -161,7 +170,7 @@ maybe('cancel_order and track_shipment (e2e, real Postgres)', () => {
       const run = await say(id, 'Cancel order #2');
       expect(run.status).toBe('completed');
       expect(seq(run.steps)).toEqual(['user:', 'assistant:get_order', 'tool:get_order', 'assistant:']); // stops at the ownership check
-      expect(toolResults(run.steps, 'get_order')[0].code).toBe('CROSS_CUSTOMER');
+      expect(toolResults(run.steps, 'get_order')[0]?.code).toBe('CROSS_CUSTOMER');
       expect(run.steps.at(-1).content).toContain('does not belong to the customer in this conversation');
       expect(await pending()).toHaveLength(0);
       expect(await events(id)).toEqual([]);
@@ -184,7 +193,7 @@ maybe('cancel_order and track_shipment (e2e, real Postgres)', () => {
         'tool:issue_refund',
         'assistant:',
       ]);
-      expect(toolResults(run.steps, 'issue_refund')[0].code).toBe('ORDER_CANCELLED');
+      expect(toolResults(run.steps, 'issue_refund')[0]?.code).toBe('ORDER_CANCELLED');
       expect(run.steps.at(-1).content).toContain('This order was cancelled and was never charged.');
       expect(await pending()).toHaveLength(0);
       const { rows } = await pool.query('SELECT count(*)::int AS n FROM refunds WHERE order_id = 11');

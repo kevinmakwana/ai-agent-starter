@@ -92,8 +92,8 @@ describe('AnthropicProvider', () => {
     expect(init.headers['x-api-key']).toBe('k');
     const body = JSON.parse(init.body);
     expect(body.system).toBe('sys');
-    expect(body.messages.map((m: any) => m.role)).toEqual(['user', 'assistant', 'user']);
-    expect(body.messages[2].content.map((b: any) => b.tool_use_id)).toEqual(['c1', 'c2']);
+    expect(body.messages.map((m: { role: string }) => m.role)).toEqual(['user', 'assistant', 'user']);
+    expect(body.messages[2].content.map((b: { tool_use_id: string }) => b.tool_use_id)).toEqual(['c1', 'c2']);
     expect(body.tools[0]).toMatchObject({ name: 'get_order', input_schema: { type: 'object' } });
   });
 
