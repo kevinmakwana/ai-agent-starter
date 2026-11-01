@@ -1,6 +1,7 @@
 import type { Pool } from 'pg';
 import { PgReviewerStore } from '../src/auth/pg-reviewer.store';
-import { createPool, ensureSchema } from '../src/db/pool';
+import { migrate } from '../src/db/migrate';
+import { createPool } from '../src/db/pool';
 import { seedDatabase } from '../src/db/seed-data';
 
 // Runs against a real Postgres; skipped unless E2E_DATABASE_URL is set (CI sets it).
@@ -14,7 +15,7 @@ maybe('reviewer store (e2e, real Postgres)', () => {
 
   beforeAll(async () => {
     pool = createPool(process.env.E2E_DATABASE_URL!);
-    await ensureSchema(pool);
+    await migrate(pool);
   });
   beforeEach(async () => {
     await pool.query('TRUNCATE reviewers, reviewer_sessions CASCADE');

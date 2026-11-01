@@ -1,5 +1,6 @@
 import type { Pool } from 'pg';
-import { RESET_SQL, SCHEMA_SQL } from './schema';
+import { migrate } from './migrate';
+import { RESET_SQL } from './schema';
 
 const CUSTOMERS = [
   ['Ava Brooks', 'ava.brooks@example.com'],
@@ -72,7 +73,7 @@ async function insertShipment(pool: Pool, n: number, orderStatus: 'shipped' | 'd
  * Order 12 has a prior partial refund, which makes the over-refund guardrail easy to demo.
  */
 export async function seedDatabase(pool: Pool): Promise<void> {
-  await pool.query(SCHEMA_SQL);
+  await migrate(pool);
   await pool.query(RESET_SQL);
 
   for (const [name, email] of CUSTOMERS) {

@@ -159,6 +159,8 @@ export type ProviderName = 'mock' | 'openai' | 'anthropic';
 export interface AppConfig {
   port: number;
   databaseUrl: string;
+  /** Apply pending migrations when the API starts (default). When false, start only if none are pending. */
+  migrateOnBoot: boolean;
   maxSteps: number;
   /** When set, /approvals and /customers require `Authorization: Bearer <key>`. */
   reviewerApiKey: string;
@@ -205,6 +207,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const db = env.POSTGRES_DB || 'aiagent';
   const cfg: AppConfig = {
     port: portNumber(env, 'API_PORT', 3001),
+    migrateOnBoot: booleanFlag(env, 'MIGRATE_ON_BOOT', true),
     databaseUrl: env.DATABASE_URL || `postgres://${user}:${pass}@localhost:${env.DB_PORT || 5432}/${db}`,
     maxSteps: positiveInt(env, 'AGENT_MAX_STEPS', 8),
     reviewerApiKey: env.REVIEWER_API_KEY || '',

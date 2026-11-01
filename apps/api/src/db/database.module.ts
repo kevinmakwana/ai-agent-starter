@@ -7,13 +7,19 @@ import { PgCustomerAuthStore } from '../auth/pg-customer.store';
 import { CUSTOMER_AUTH_STORE, REVIEWER_STORE } from '../auth/tokens';
 import { PgAgentStore } from './pg-agent.store';
 import { PgShopRepo } from './pg-shop.repo';
-import { createPool, ensureSchema } from './pool';
+import { assertUpToDate, migrate } from './migrate';
+import { createPool } from './pool';
 
 @Injectable()
 class DatabaseLifecycle implements OnModuleInit, OnApplicationShutdown {
-  constructor(@Inject(PG_POOL) private readonly pool: Pool) {}
-  onModuleInit() {
-    return ensureSchema(this.pool);
+  constructor(
+    @Inject(PG_POOL) private readonly pool: Pool,
+    @Inject(APP_CONFIG) private readonly cfg: ReturnType<typeof loadConfig>,
+  ) {}
+  async onModuleInit() {
+    // Deployments that migrate as a separate step set MIGRATE_ON_BOOT=false: the API then only checks, and refuses to start behind.
+    if (this.cfg.migrateOnBoot) await migrate(this.pool);
+    else await assertUpToDate(this.pool);
   }
   onApplicationShutdown() {
     return this.pool.end();

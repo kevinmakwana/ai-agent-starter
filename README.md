@@ -86,7 +86,7 @@ Open <http://localhost:3000>. The API is also published on `127.0.0.1:3001`. Cre
 - `NODE_ENV=production` makes the session cookie `Secure`, which plain `http://localhost` cannot keep in every browser, so compose sets `COOKIE_SECURE=false` unless you override it. Set it to `true` behind HTTPS.
 - Host ports: `DB_PORT`, `API_PORT` and `WEB_PORT` (default 3000). `NODE_IMAGE` (default `node:22-alpine`) picks the base image for both builds; pin a digest there for reproducible builds.
 - `npm run db:up` still starts only the database, and `npm run db:down` stops every service.
-- **Not production-ready as shipped:** there is no TLS, no migration step beyond the idempotent DDL on boot (TODO 5.5) and a single API instance is assumed (see Known limitations). The images were built and run with the mock provider; the live LLM and mail paths were not exercised in containers.
+- **Not production-ready as shipped:** there is no TLS and a single API instance is assumed for the approval-expiry sweep (see Known limitations). The images were built and run with the mock provider; the live LLM and mail paths were not exercised in containers.
 
 **Upgrading an existing demo database?** Builds with `track_shipment` read a `shipments` table that older seeds did not fill. Re-run `npm run seed` once, otherwise shipped and delivered orders report "not shipped" (the seed resets the demo data).
 
@@ -304,6 +304,17 @@ Each attempt has a 5 s timeout (20 s for email); anything but a 2xx response, or
 
 Test coverage: the channels are covered by unit tests with fakes (the email channel through nodemailer's JSON transport, the others with a fake `fetch`), and the webhook additionally by an end-to-end test against Postgres and a local receiver. They have **not** been exercised against a real Slack workspace or SMTP server, so try yours with a test approval (see the quick start) before relying on it.
 
+## Database migrations
+
+The schema is versioned: numbered migrations in `apps/api/src/db/migrations/` (SQL in TypeScript modules, so they ship inside the compiled app) are applied once each, in order, and recorded in a `schema_migrations` table with a SHA-256 checksum of their text.
+
+- **When they run.** By default the API applies pending migrations when it starts (`MIGRATE_ON_BOOT=true`), so `npm run dev`, the seed script and `docker compose up` keep working with no extra step. A session advisory lock serializes concurrent starters (several replicas booting together): one applies, the rest wait up to 60 s and find nothing to do. Each migration runs in its own transaction together with its bookkeeping row, so a failure leaves the database exactly as it was, and a DDL step that cannot get its table lock within 30 s fails instead of queueing behind live traffic.
+- **Migrating as a separate step.** `npm run migrate -w apps/api` (or `node dist/cli/migrate.js`, e.g. `docker compose exec api node dist/cli/migrate.js`) applies them; `-- --status` lists the pending ones and exits 1 if there are any. With `MIGRATE_ON_BOOT=false` the API only checks, and refuses to start while a migration is pending. Rollout order for that mode: take a backup, run `migrate`, then start or restart the API.
+- **Existing databases.** `0001-baseline` is the idempotent DDL the API used to run on every boot, so a database created by any earlier version adopts it without special handling: the first run changes nothing it already has and records version 1. Tests build the real schemas of four earlier commits (the first one, after Phase 2, after the audit log, and just before reviewer accounts), put data in them, migrate, and check the data is intact and the schema equals a new database's. One side effect on that first run: the baseline still re-adds two CHECK constraints (as it did on every boot before), which briefly locks `runs` and `approval_events` once.
+- **Writing a migration.** Add `000N-name.ts` exporting the SQL, append it to `MIGRATIONS` in `migrations/index.ts`. Never edit or reorder a released migration: a changed text, a different name or a gap in the history stops the start with an error (and a test pins the baseline's checksum). Keep each migration to statements that can run in a transaction (no `CREATE INDEX CONCURRENTLY`), compatible with the previous application version (add first, remove in a later release), because during a rolling deploy the old version runs against the new schema. Add any new table to `RESET_SQL` in `schema.ts` (a test fails if one is missing); `schema_migrations` must stay out of it.
+- **Forward-only.** There are no down migrations. To undo a change, write a new migration, or restore the backup. An API that finds migrations it does not know (the database was migrated by a newer version) logs a warning and starts; this is only safe if those migrations followed the compatibility rule above.
+- **Not covered.** No migration has been applied to a production-sized database; a long table rewrite would hold its lock for as long as it takes. The advisory lock does not help if a process is killed mid-migration, but the transaction does: nothing is half-applied.
+
 ## Logging
 
 Every request gets an id: a well-formed `X-Request-Id` from the caller is kept (8-64 characters of `A-Za-z0-9._-`), anything else is replaced by a UUID, and it is returned in the `X-Request-Id` response header. The Next.js proxy forwards it (or makes one), so a browser request, the API's access line and any log written while serving it share one id. Each finished request writes one `Http` line: method, path **without the query string**, status and duration; never headers, cookies or bodies. Health probes are not logged.
@@ -320,6 +331,7 @@ One root `.env` (see [.env.example](.env.example)); everything is optional.
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | `postgres` / `postgres` / `aiagent` | Database credentials |
 | `DATABASE_URL` | built from the above | Full connection string override |
 | `API_PORT` | `3001` | NestJS port (1-65535) |
+| `MIGRATE_ON_BOOT` | `true` | Apply pending migrations at start. `false`: only check, and refuse to start while any is pending (see Database migrations) |
 | `LOG_FORMAT` | `json` in production, else `pretty` | `json` or `pretty` (anything else stops the API at startup) |
 | `API_URL` | `http://localhost:3001` | Where Next.js proxies `/api/*` (set to `http://api:3001` by compose) |
 | `WEB_PORT` / `NODE_IMAGE` | `3000` / `node:22-alpine` | Docker only: host port of the web container, base image of both builds |
@@ -435,7 +447,7 @@ This is a **starter, not a production service**. What is and isn't protected:
 - Run steps as a background job (queue) so long agent runs don't hold an HTTP request open.
 - Prompt-injection and eval suites; replay recorded traces against new prompts or models.
 - Per-tool rate limits and spend budgets across conversations (per-conversation token budgets exist).
-- Real migrations (the schema is idempotent DDL applied on boot) and multi-tenant data.
+- Down migrations (they are forward-only) and multi-tenant data.
 
 ## License
 
