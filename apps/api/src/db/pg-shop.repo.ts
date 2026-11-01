@@ -31,10 +31,11 @@ export class PgShopRepo implements ShopRepo {
   }
 
   async createTicket(input: { customerId: number; subject: string; body: string }): Promise<Ticket> {
-    const { rows } = await this.pool.query(
-      'INSERT INTO tickets (customer_id, subject, body) VALUES ($1, $2, $3) RETURNING *',
-      [input.customerId, input.subject, input.body],
-    );
+    const { rows } = await this.pool.query('INSERT INTO tickets (customer_id, subject, body) VALUES ($1, $2, $3) RETURNING *', [
+      input.customerId,
+      input.subject,
+      input.body,
+    ]);
     return camel<Ticket>(rows[0]);
   }
 
@@ -57,10 +58,12 @@ export class PgShopRepo implements ShopRepo {
       }
       const prior = await client.query('SELECT COALESCE(SUM(amount), 0) AS total FROM refunds WHERE order_id = $1', [input.orderId]);
       assertRefundable({ amount: input.amount, orderTotal: o.rows[0].total, priorRefunded: prior.rows[0].total, status: o.rows[0].status });
-      const ins = await client.query(
-        'INSERT INTO refunds (order_id, amount, reason, action_id) VALUES ($1, $2, $3, $4) RETURNING id',
-        [input.orderId, input.amount, input.reason, input.actionId ?? null],
-      );
+      const ins = await client.query('INSERT INTO refunds (order_id, amount, reason, action_id) VALUES ($1, $2, $3, $4) RETURNING id', [
+        input.orderId,
+        input.amount,
+        input.reason,
+        input.actionId ?? null,
+      ]);
       await client.query('COMMIT');
       return { refundId: ins.rows[0].id as number, refundedTotal: Math.round((prior.rows[0].total + input.amount) * 100) / 100 };
     } catch (e) {
@@ -91,7 +94,10 @@ export class PgShopRepo implements ShopRepo {
       }
       const refunded = await client.query('SELECT COALESCE(SUM(amount), 0) AS total FROM refunds WHERE order_id = $1', [input.orderId]);
       assertCancellable({ status: o.rows[0].status, priorRefunded: refunded.rows[0].total });
-      await client.query("UPDATE orders SET status = 'cancelled', cancel_action_id = $2 WHERE id = $1", [input.orderId, input.actionId ?? null]);
+      await client.query("UPDATE orders SET status = 'cancelled', cancel_action_id = $2 WHERE id = $1", [
+        input.orderId,
+        input.actionId ?? null,
+      ]);
       await client.query('COMMIT');
       return { orderId: input.orderId, status: 'cancelled' as const };
     } catch (e) {

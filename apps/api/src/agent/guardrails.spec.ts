@@ -5,7 +5,13 @@ import { MemoryShop } from '../../test/fakes';
 import type { Order } from './types';
 
 const tool = (name: string) => TOOLS.find((t) => t.name === name)!;
-const code = (fn: () => unknown) => { try { fn(); } catch (e) { return (e as GuardrailViolation).code; } };
+const code = (fn: () => unknown) => {
+  try {
+    fn();
+  } catch (e) {
+    return (e as GuardrailViolation).code;
+  }
+};
 
 describe('pure guardrails', () => {
   it('blocks access to another customer', () => {
@@ -56,20 +62,37 @@ describe('tool-level guardrails (conversation bound to customer 1)', () => {
     const c = ctx();
     await expect(tool('get_order').execute(c, { orderId: 2 })).rejects.toMatchObject({ code: 'CROSS_CUSTOMER' });
     await expect(tool('get_customer').execute(c, { email: 'ben.carter@example.com' })).rejects.toMatchObject({ code: 'CROSS_CUSTOMER' });
-    await expect(tool('issue_refund').preflight!(c, { orderId: 2, amount: 5, reason: 'nope' })).rejects.toMatchObject({ code: 'CROSS_CUSTOMER' });
+    await expect(tool('issue_refund').preflight!(c, { orderId: 2, amount: 5, reason: 'nope' })).rejects.toMatchObject({
+      code: 'CROSS_CUSTOMER',
+    });
   });
 
   it('blocks an over-refund at preflight and at execution', async () => {
     const c = ctx();
-    await expect(tool('issue_refund').preflight!(c, { orderId: 1, amount: 50.01, reason: 'too much' })).rejects.toMatchObject({ code: 'OVER_REFUND' });
-    await expect(tool('issue_refund').execute(c, { orderId: 1, amount: 50.01, reason: 'too much' })).rejects.toMatchObject({ code: 'OVER_REFUND' });
+    await expect(tool('issue_refund').preflight!(c, { orderId: 1, amount: 50.01, reason: 'too much' })).rejects.toMatchObject({
+      code: 'OVER_REFUND',
+    });
+    await expect(tool('issue_refund').execute(c, { orderId: 1, amount: 50.01, reason: 'too much' })).rejects.toMatchObject({
+      code: 'OVER_REFUND',
+    });
   });
 
-  const processing = (id = 10): Order => ({ id, customerId: 1, status: 'processing', total: 30, items: [], createdAt: '2026-01-05T00:00:00.000Z' });
+  const processing = (id = 10): Order => ({
+    id,
+    customerId: 1,
+    status: 'processing',
+    total: 30,
+    items: [],
+    createdAt: '2026-01-05T00:00:00.000Z',
+  });
 
   it('track_shipment returns the shipment of an own delivered order', async () => {
     await expect(tool('track_shipment').execute(ctx(), { orderId: 1 })).resolves.toMatchObject({
-      shipped: true, orderId: 1, carrier: 'FedEx', trackingNumber: 'FX900000001', status: 'delivered',
+      shipped: true,
+      orderId: 1,
+      carrier: 'FedEx',
+      trackingNumber: 'FX900000001',
+      status: 'delivered',
     });
   });
 
@@ -84,7 +107,9 @@ describe('tool-level guardrails (conversation bound to customer 1)', () => {
     const shop = new MemoryShop();
     shop.orders.push(processing());
     await expect(tool('track_shipment').execute({ customerId: 1, shop }, { orderId: 10 })).resolves.toEqual({
-      shipped: false, orderId: 10, orderStatus: 'processing',
+      shipped: false,
+      orderId: 10,
+      orderStatus: 'processing',
     });
   });
 
@@ -106,7 +131,8 @@ describe('tool-level guardrails (conversation bound to customer 1)', () => {
     const shop = new MemoryShop();
     shop.orders.push(processing());
     await expect(tool('cancel_order').execute({ customerId: 1, shop }, { orderId: 10, reason: 'changed my mind' })).resolves.toEqual({
-      orderId: 10, status: 'cancelled',
+      orderId: 10,
+      status: 'cancelled',
     });
     expect((await shop.getOrder(10))?.status).toBe('cancelled');
   });

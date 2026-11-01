@@ -18,7 +18,10 @@ const LOGIN_DENIED = 'Sign in to access this conversation';
  */
 @Injectable()
 export class ConversationAccessGuard implements CanActivate {
-  constructor(private readonly store: PgAgentStore, @Inject(APP_CONFIG) private readonly cfg: AppConfig) {}
+  constructor(
+    private readonly store: PgAgentStore,
+    @Inject(APP_CONFIG) private readonly cfg: AppConfig,
+  ) {}
 
   async canActivate(ctx: ExecutionContext): Promise<boolean> {
     const req = ctx.switchToHttp().getRequest<Request>();
@@ -39,7 +42,8 @@ export class ConversationAccessGuard implements CanActivate {
     }
     if (login) throw new UnauthorizedException(LOGIN_DENIED); // conversation tokens are not consulted
     const token = req.headers[CONVERSATION_TOKEN_HEADER];
-    if (typeof token === 'string' && typeof id === 'string' && isUUID(id) && (await this.store.verifyConversationToken(id, token))) return true;
+    if (typeof token === 'string' && typeof id === 'string' && isUUID(id) && (await this.store.verifyConversationToken(id, token)))
+      return true;
     throw new UnauthorizedException('A valid conversation token or reviewer credentials are required');
   }
 }

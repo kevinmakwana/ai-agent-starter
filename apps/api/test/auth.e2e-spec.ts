@@ -76,7 +76,9 @@ maybe('reviewer accounts: login, sessions, admin routes (e2e, real Postgres)', (
     it('logs in with a hardened cookie, returns the reviewer without secrets, and serves /auth/me', async () => {
       await addReviewer('alex@example.com', 'admin');
       const res = await rawLogin('Alex@Example.com').expect(200);
-      expect(res.body).toEqual({ reviewer: expect.objectContaining({ email: 'alex@example.com', name: 'alex', role: 'admin', active: true }) });
+      expect(res.body).toEqual({
+        reviewer: expect.objectContaining({ email: 'alex@example.com', name: 'alex', role: 'admin', active: true }),
+      });
       const cookie = (res.headers['set-cookie'] as unknown as string[])[0];
       expect(cookie).toMatch(/^reviewer_session=[A-Za-z0-9_-]{43};/);
       expect(cookie).toContain('HttpOnly');
@@ -131,7 +133,12 @@ maybe('reviewer accounts: login, sessions, admin routes (e2e, real Postgres)', (
       for (let i = 0; i < 5; i++) await rawLogin('locked@example.com', 'wrong password!!').expect(401);
 
       const bodies: unknown[] = [];
-      for (const [email, pw] of [['nobody@example.com', PW], ['alex@example.com', 'wrong password!!'], ['off@example.com', PW], ['locked@example.com', PW]]) {
+      for (const [email, pw] of [
+        ['nobody@example.com', PW],
+        ['alex@example.com', 'wrong password!!'],
+        ['off@example.com', PW],
+        ['locked@example.com', PW],
+      ]) {
         const res = await rawLogin(email, pw).expect(401);
         expect(res.headers['set-cookie']).toBeUndefined();
         bodies.push(res.body);
@@ -158,7 +165,11 @@ maybe('reviewer accounts: login, sessions, admin routes (e2e, real Postgres)', (
 
     it('rejects malformed input with a 400 that never echoes the password', async () => {
       const secret = 'S3cret-Pass-phrase-xyz';
-      for (const body of [{ email: 'not-an-email', password: secret }, { email: 'a@b.co', password: secret, extra: 1 }, { email: 'a@b.co', password: secret.repeat(20) }]) {
+      for (const body of [
+        { email: 'not-an-email', password: secret },
+        { email: 'a@b.co', password: secret, extra: 1 },
+        { email: 'a@b.co', password: secret.repeat(20) },
+      ]) {
         const res = await http().post('/auth/login').set(CSRF).send(body).expect(400);
         expect(JSON.stringify(res.body)).not.toContain(secret);
       }
@@ -221,7 +232,12 @@ maybe('reviewer accounts: login, sessions, admin routes (e2e, real Postgres)', (
       await bare('patch', `/reviewers/${admin.id}`).send({ name: 'Y' }).expect(403);
       await as(cookie).get('/approvals').expect(200);
       await as(cookie).get('/reviewers').expect(200);
-      await http().post('/approvals/00000000-0000-4000-8000-000000000000').set('Cookie', cookie).set('X-Requested-By', 'something-else').send({ decision: 'reject' }).expect(403);
+      await http()
+        .post('/approvals/00000000-0000-4000-8000-000000000000')
+        .set('Cookie', cookie)
+        .set('X-Requested-By', 'something-else')
+        .send({ decision: 'reject' })
+        .expect(403);
       // with the header the request reaches the route (an unknown approval is a 404)
       await as(cookie).post('/approvals/00000000-0000-4000-8000-000000000000').send({ decision: 'reject' }).expect(404);
     });
@@ -239,7 +255,11 @@ maybe('reviewer accounts: login, sessions, admin routes (e2e, real Postgres)', (
       await boot({ REVIEWER_API_KEY: 'rev-key' });
       await http().get('/approvals').expect(401);
       await http().get('/approvals').set('Authorization', 'Bearer rev-key').expect(200);
-      await http().post('/approvals/00000000-0000-4000-8000-000000000000').set('Authorization', 'Bearer rev-key').send({ decision: 'reject' }).expect(404);
+      await http()
+        .post('/approvals/00000000-0000-4000-8000-000000000000')
+        .set('Authorization', 'Bearer rev-key')
+        .send({ decision: 'reject' })
+        .expect(404);
       expect((await http().get('/health').expect(200)).body).toMatchObject({ reviewerAuth: true, reviewerAccounts: false });
 
       await addReviewer('alex@example.com', 'admin'); // same process: the mode flips immediately
@@ -294,14 +314,28 @@ maybe('reviewer accounts: login, sessions, admin routes (e2e, real Postgres)', (
     it('lets an admin list, add and edit reviewers; views never carry secrets', async () => {
       await addReviewer('admin@example.com', 'admin');
       const cookie = await login('admin@example.com');
-      const created = await as(cookie).post('/reviewers').send({ email: 'New@Example.com', name: 'New Person', role: 'reviewer', password: PW }).expect(201);
+      const created = await as(cookie)
+        .post('/reviewers')
+        .send({ email: 'New@Example.com', name: 'New Person', role: 'reviewer', password: PW })
+        .expect(201);
       expect(created.body).toEqual({
-        id: expect.any(String), email: 'new@example.com', name: 'New Person', role: 'reviewer', active: true,
-        createdAt: expect.any(String), lastLoginAt: null,
+        id: expect.any(String),
+        email: 'new@example.com',
+        name: 'New Person',
+        role: 'reviewer',
+        active: true,
+        createdAt: expect.any(String),
+        lastLoginAt: null,
       });
-      await as(cookie).post('/reviewers').send({ email: 'new@example.com', name: 'Dup', role: 'reviewer', password: PW }).expect(409)
+      await as(cookie)
+        .post('/reviewers')
+        .send({ email: 'new@example.com', name: 'Dup', role: 'reviewer', password: PW })
+        .expect(409)
         .expect((r) => expect(r.body.code).toBe('EMAIL_TAKEN'));
-      await as(cookie).post('/reviewers').send({ email: 'weak@example.com', name: 'Weak', role: 'reviewer', password: 'short' }).expect(400);
+      await as(cookie)
+        .post('/reviewers')
+        .send({ email: 'weak@example.com', name: 'Weak', role: 'reviewer', password: 'short' })
+        .expect(400);
       await as(cookie).post('/reviewers').send({ email: 'x@example.com', name: 'X', role: 'owner', password: PW }).expect(400);
 
       const patched = await as(cookie).patch(`/reviewers/${created.body.id}`).send({ name: 'Renamed', role: 'admin' }).expect(200);
@@ -319,7 +353,7 @@ maybe('reviewer accounts: login, sessions, admin routes (e2e, real Postgres)', (
       expect(list.body).toHaveLength(2);
     });
 
-    it('an admin reset of a password or a demotion ends that reviewer\'s sessions', async () => {
+    it("an admin reset of a password or a demotion ends that reviewer's sessions", async () => {
       await addReviewer('admin@example.com', 'admin');
       const bob = await addReviewer('bob@example.com', 'admin');
       const adminCookie = await login('admin@example.com');

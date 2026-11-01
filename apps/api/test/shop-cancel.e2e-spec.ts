@@ -30,7 +30,11 @@ maybe('cancelOrder and getShipment in the store (real Postgres)', () => {
   });
   afterEach(() => app?.close());
 
-  const rejection = async (p: Promise<unknown>) => p.then(() => undefined, (e: { code?: string }) => e.code);
+  const rejection = async (p: Promise<unknown>) =>
+    p.then(
+      () => undefined,
+      (e: { code?: string }) => e.code,
+    );
   const statusOf = async (orderId: number) => (await shop.getOrder(orderId))!.status;
 
   it('cancels a processing order and never exposes the internal action column', async () => {
@@ -98,7 +102,14 @@ maybe('cancelOrder and getShipment in the store (real Postgres)', () => {
   describe('row lock (deterministic)', () => {
     const settled = (p: Promise<unknown>) => {
       const state = { done: false };
-      const tracked = p.then(() => { state.done = true; }, () => { state.done = true; });
+      const tracked = p.then(
+        () => {
+          state.done = true;
+        },
+        () => {
+          state.done = true;
+        },
+      );
       return { state, tracked };
     };
     const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -178,7 +189,11 @@ maybe('cancelOrder and getShipment in the store (real Postgres)', () => {
           events: expect.any(Array),
         });
         expect(shipment!.events.length).toBeGreaterThanOrEqual(3);
-        expect(shipment!.events[0]).toEqual({ at: expect.stringMatching(/^\d{4}-/), location: expect.any(String), description: expect.any(String) });
+        expect(shipment!.events[0]).toEqual({
+          at: expect.stringMatching(/^\d{4}-/),
+          location: expect.any(String),
+          description: expect.any(String),
+        });
       } else {
         expect(shipment).toBeNull();
       }

@@ -21,7 +21,11 @@ export function optional(env: NodeJS.ProcessEnv, name: string): string | undefin
 /** Parses `raw`, or returns null when it is not a URL or its protocol is not one of `protocols`. */
 function parseUrl(raw: string, protocols: string[]): URL | null {
   let url: URL;
-  try { url = new URL(raw); } catch { return null; }
+  try {
+    url = new URL(raw);
+  } catch {
+    return null;
+  }
   return protocols.includes(url.protocol) ? url : null;
 }
 
@@ -53,7 +57,10 @@ export function httpUrl(name: string, raw: string): string {
  */
 export function smtpUrl(name: string, raw: string): string {
   const url = parseUrl(raw, ['smtp:', 'smtps:']);
-  if (!url) throw new Error(`${name} must be an smtp:// or smtps:// URL (percent-encode special characters such as @ # : in the user name and password)`);
+  if (!url)
+    throw new Error(
+      `${name} must be an smtp:// or smtps:// URL (percent-encode special characters such as @ # : in the user name and password)`,
+    );
   if (url.hostname === '') throw new Error(`${name} must include a host`);
   if (url.search !== '' || url.hash !== '' || raw.includes('?') || raw.includes('#')) {
     throw new Error(`${name} must not contain a query string or fragment (percent-encode special characters in the password)`);
@@ -88,7 +95,10 @@ export function loadNotifyConfig(env: NodeJS.ProcessEnv): NotifyConfig {
   const to = optional(env, 'NOTIFY_EMAIL_TO');
   if (smtp || from || to) {
     if (!smtp || !from || !to) throw new Error('Email notifications need NOTIFY_SMTP_URL, NOTIFY_EMAIL_FROM and NOTIFY_EMAIL_TO together');
-    const recipients = to.split(',').map((a) => a.trim()).filter(Boolean);
+    const recipients = to
+      .split(',')
+      .map((a) => a.trim())
+      .filter(Boolean);
     if (recipients.length === 0) throw new Error('NOTIFY_EMAIL_TO must list at least one email address');
     cfg.email = {
       smtpUrl: smtpUrl('NOTIFY_SMTP_URL', smtp),

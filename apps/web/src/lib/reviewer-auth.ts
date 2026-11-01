@@ -16,6 +16,7 @@ export function canApprove(a: Approval, me: Reviewer | null): { allowed: boolean
   if (a.status !== 'pending_approval') return { allowed: false, reason: 'Already decided.' };
   if ((a.approvalsRequired ?? 1) < 2) return { allowed: true, reason: null };
   if (!me) return { allowed: false, reason: 'Two reviewers must approve this. Sign in with a reviewer account to approve.' };
-  if (a.approvedByIds?.includes(me.id)) return { allowed: false, reason: 'You already approved this. A different reviewer must give the second approval.' };
+  if (a.approvedByIds?.includes(me.id))
+    return { allowed: false, reason: 'You already approved this. A different reviewer must give the second approval.' };
   return { allowed: true, reason: null };
 }

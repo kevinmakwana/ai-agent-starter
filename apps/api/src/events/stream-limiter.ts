@@ -12,7 +12,8 @@ export class StreamLimiter {
       if (released) return;
       released = true;
       const left = (this.open.get(key) ?? 1) - 1;
-      if (left <= 0) this.open.delete(key); else this.open.set(key, left);
+      if (left <= 0) this.open.delete(key);
+      else this.open.set(key, left);
     };
   }
 }

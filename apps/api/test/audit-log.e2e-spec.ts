@@ -34,7 +34,12 @@ maybe('approval audit log in the store (real Postgres)', () => {
     const conv = await store.createConversation(1, 't');
     const run = await store.createRun(conv.id);
     const action = await store.createAction({
-      runId: run.id, conversationId: conv.id, toolName: 'issue_refund', toolArgs, toolCallId: 'call_1', reasoning: 'r',
+      runId: run.id,
+      conversationId: conv.id,
+      toolName: 'issue_refund',
+      toolArgs,
+      toolCallId: 'call_1',
+      reasoning: 'r',
       policy: { rule: 'over_threshold', detail: { threshold: 10, priorRefunded: 0, amount: 18.75 } },
     });
     return { conv, run, action };
@@ -45,8 +50,17 @@ maybe('approval audit log in the store (real Postgres)', () => {
     const events = await store.listApprovalEvents({ conversationId: conv.id });
     expect(events).toEqual([
       expect.objectContaining({
-        kind: 'requested', actionId: action.id, runId: run.id, conversationId: conv.id, actorType: 'policy', actorId: null,
-        toolName: 'issue_refund', toolArgs, rule: 'over_threshold', detail: { threshold: 10, priorRefunded: 0, amount: 18.75 }, note: null,
+        kind: 'requested',
+        actionId: action.id,
+        runId: run.id,
+        conversationId: conv.id,
+        actorType: 'policy',
+        actorId: null,
+        toolName: 'issue_refund',
+        toolArgs,
+        rule: 'over_threshold',
+        detail: { threshold: 10, priorRefunded: 0, amount: 18.75 },
+        note: null,
       }),
     ]);
   });
@@ -54,7 +68,14 @@ maybe('approval audit log in the store (real Postgres)', () => {
   it('writes a requested event with no rule when the caller gave no policy', async () => {
     const conv = await store.createConversation(1, 't');
     const run = await store.createRun(conv.id);
-    await store.createAction({ runId: run.id, conversationId: conv.id, toolName: 'issue_refund', toolArgs, toolCallId: 'c', reasoning: 'r' });
+    await store.createAction({
+      runId: run.id,
+      conversationId: conv.id,
+      toolName: 'issue_refund',
+      toolArgs,
+      toolCallId: 'c',
+      reasoning: 'r',
+    });
     expect(await store.listApprovalEvents({ conversationId: conv.id })).toEqual([
       expect.objectContaining({ kind: 'requested', rule: null, detail: null }),
     ]);
@@ -82,19 +103,34 @@ maybe('approval audit log in the store (real Postgres)', () => {
     expect(admin.id).toBeDefined();
     const byAction = async (a: { id: string }, c: { id: string }) =>
       (await store.listApprovalEvents({ conversationId: c.id })).find((e) => e.actionId === a.id && e.kind !== 'requested');
-    expect(await byAction(named.action, named.conv)).toMatchObject({ kind: 'approved', actorType: 'reviewer', actorId: alex.id, actorName: 'Alex Reviewer' });
-    expect(await byAction(keyed.action, keyed.conv)).toMatchObject({ kind: 'rejected', actorType: 'reviewer', actorId: null, actorName: null });
-    expect(await byAction(expired.action, expired.conv)).toMatchObject({ kind: 'expired', actorType: 'system', actorId: null, actorName: null });
+    expect(await byAction(named.action, named.conv)).toMatchObject({
+      kind: 'approved',
+      actorType: 'reviewer',
+      actorId: alex.id,
+      actorName: 'Alex Reviewer',
+    });
+    expect(await byAction(keyed.action, keyed.conv)).toMatchObject({
+      kind: 'rejected',
+      actorType: 'reviewer',
+      actorId: null,
+      actorName: null,
+    });
+    expect(await byAction(expired.action, expired.conv)).toMatchObject({
+      kind: 'expired',
+      actorType: 'system',
+      actorId: null,
+      actorName: null,
+    });
     // policy-written events (requested) never carry a name either
-    expect((await store.listApprovalEvents({ conversationId: named.conv.id })).at(-1)).toMatchObject({ kind: 'requested', actorName: null });
+    expect((await store.listApprovalEvents({ conversationId: named.conv.id })).at(-1)).toMatchObject({
+      kind: 'requested',
+      actorName: null,
+    });
   });
 
   it('writes exactly one decision event when two decisions race', async () => {
     const { action, conv } = await park();
-    const results = await Promise.all([
-      store.decideAction(action.id, 'approved', 'a'),
-      store.decideAction(action.id, 'rejected', 'b'),
-    ]);
+    const results = await Promise.all([store.decideAction(action.id, 'approved', 'a'), store.decideAction(action.id, 'rejected', 'b')]);
     expect(results.filter(Boolean)).toHaveLength(1);
     const kinds = (await store.listApprovalEvents({ conversationId: conv.id })).map((e) => e.kind);
     expect(kinds.filter((k) => k !== 'requested')).toHaveLength(1);
@@ -102,7 +138,10 @@ maybe('approval audit log in the store (real Postgres)', () => {
 
   it('records an expiry as a system decision', async () => {
     const { action, conv } = await park();
-    await store.decideAction(action.id, 'rejected', 'Expired: no reviewer decision within 1 minute.', { kind: 'expired', actorType: 'system' });
+    await store.decideAction(action.id, 'rejected', 'Expired: no reviewer decision within 1 minute.', {
+      kind: 'expired',
+      actorType: 'system',
+    });
     expect((await store.listApprovalEvents({ conversationId: conv.id }))[0]).toMatchObject({ kind: 'expired', actorType: 'system' });
   });
 
@@ -110,8 +149,14 @@ maybe('approval audit log in the store (real Postgres)', () => {
     const conv = await store.createConversation(1, 't');
     const run = await store.createRun(conv.id);
     const saved = await store.addApprovalEvent({
-      kind: 'auto_approved', runId: run.id, conversationId: conv.id, actorType: 'policy', toolName: 'issue_refund', toolArgs,
-      rule: 'under_threshold', detail: { threshold: 25 },
+      kind: 'auto_approved',
+      runId: run.id,
+      conversationId: conv.id,
+      actorType: 'policy',
+      toolName: 'issue_refund',
+      toolArgs,
+      rule: 'under_threshold',
+      detail: { threshold: 25 },
     });
     expect(saved).toMatchObject({ id: expect.any(Number), actionId: null, rule: 'under_threshold', note: null });
   });
@@ -135,13 +180,22 @@ maybe('approval audit log in the store (real Postgres)', () => {
   it('exposes why a human was needed on the approval listing', async () => {
     const { action } = await park();
     const [view] = await store.listApprovals({ status: 'pending_approval' });
-    expect(view).toMatchObject({ id: action.id, policyRule: 'over_threshold', policyDetail: { threshold: 10, priorRefunded: 0, amount: 18.75 } });
+    expect(view).toMatchObject({
+      id: action.id,
+      policyRule: 'over_threshold',
+      policyDetail: { threshold: 10, priorRefunded: 0, amount: 18.75 },
+    });
   });
 
   it('exposes the order status on the approval listing, null when the order is unknown', async () => {
     const { conv, run } = await park();
     const unknown = await store.createAction({
-      runId: run.id, conversationId: conv.id, toolName: 'cancel_order', toolArgs: { orderId: 999999, reason: 'x' }, toolCallId: 'call_2', reasoning: 'r',
+      runId: run.id,
+      conversationId: conv.id,
+      toolName: 'cancel_order',
+      toolArgs: { orderId: 999999, reason: 'x' },
+      toolCallId: 'call_2',
+      reasoning: 'r',
     });
     const views = await store.listApprovals({ conversationId: conv.id });
     expect(views.find((v) => v.toolArgs && (v.toolArgs as any).orderId === 1)).toMatchObject({ orderStatus: 'delivered' });
@@ -200,7 +254,10 @@ maybe('approval audit log over HTTP (real Postgres)', () => {
       await http().post(`/approvals/${pending.id}`).set(reviewer).send({ decision: 'approve', note: 'ok' }).expect(201);
 
       const events = (await http().get('/approvals/events').set(reviewer).expect(200)).body;
-      expect(events.map((e: any) => [e.kind, e.actorType])).toEqual([['approved', 'reviewer'], ['requested', 'policy']]);
+      expect(events.map((e: any) => [e.kind, e.actorType])).toEqual([
+        ['approved', 'reviewer'],
+        ['requested', 'policy'],
+      ]);
       expect(events[0]).toMatchObject({ actionId: pending.id, note: 'ok', actorId: null, toolName: 'issue_refund' });
       expect(events[0].toolArgs).toMatchObject({ orderId: 1, amount: 18.75 });
     });
@@ -211,7 +268,12 @@ maybe('approval audit log over HTTP (real Postgres)', () => {
       expect(sent.body.run.status).toBe('awaiting_approval');
 
       const [pending] = (await http().get('/approvals?status=pending').set(reviewer).expect(200)).body;
-      expect(pending).toMatchObject({ toolName: 'cancel_order', toolArgs: { orderId: 11 }, policyRule: 'tool_requires_review', orderStatus: 'processing' });
+      expect(pending).toMatchObject({
+        toolName: 'cancel_order',
+        toolArgs: { orderId: 11 },
+        policyRule: 'tool_requires_review',
+        orderStatus: 'processing',
+      });
 
       const asCustomer = (await http().get(`/conversations/${c.id}`).set(c.token).expect(200)).body;
       expect(asCustomer.approvals[0]).toMatchObject({ toolName: 'cancel_order', orderStatus: 'processing' });
@@ -248,7 +310,6 @@ maybe('approval audit log over HTTP (real Postgres)', () => {
       await http().get('/approvals/events').set(c.token).expect(401);
       await http().get('/approvals/events').set(reviewer).expect(200);
     });
-
   });
 
   describe('with REFUND_AUTO_APPROVE_UNDER=25', () => {
@@ -267,7 +328,10 @@ maybe('approval audit log over HTTP (real Postgres)', () => {
       const events = (await http().get('/approvals/events').set(reviewer).expect(200)).body;
       expect(events).toEqual([
         expect.objectContaining({
-          kind: 'auto_approved', actorType: 'policy', actionId: null, rule: 'under_threshold',
+          kind: 'auto_approved',
+          actorType: 'policy',
+          actionId: null,
+          rule: 'under_threshold',
           detail: { threshold: 25, priorRefunded: 0, amount: 18.75 },
         }),
       ]);

@@ -26,22 +26,39 @@ import { AgentRunner } from './runner';
 import type { ChatProvider } from './types';
 
 @Module({
-  controllers: [HealthController, ConversationsController, ApprovalsController, EventsController, AuthController, ReviewersController, CustomerAuthController],
+  controllers: [
+    HealthController,
+    ConversationsController,
+    ApprovalsController,
+    EventsController,
+    AuthController,
+    ReviewersController,
+    CustomerAuthController,
+  ],
   providers: [
     { provide: CHAT_PROVIDER, inject: [APP_CONFIG], useFactory: (cfg: AppConfig) => createProvider(cfg) },
     {
       provide: AgentRunner,
       inject: [CHAT_PROVIDER, PgShopRepo, PgAgentStore, APP_CONFIG],
       useFactory: (provider: ChatProvider, shop: PgShopRepo, store: PgAgentStore, cfg: AppConfig) =>
-        new AgentRunner({ provider, shop, store, maxSteps: cfg.maxSteps, tokenBudget: cfg.conversationTokenBudget,
-          maxContextTokens: cfg.contextMaxTokens, approvalPolicy: cfg.approvalPolicy }),
+        new AgentRunner({
+          provider,
+          shop,
+          store,
+          maxSteps: cfg.maxSteps,
+          tokenBudget: cfg.conversationTokenBudget,
+          maxContextTokens: cfg.contextMaxTokens,
+          approvalPolicy: cfg.approvalPolicy,
+        }),
     },
     {
       provide: ApprovalExpiry,
       inject: [AgentRunner, PgAgentStore, APP_CONFIG],
       useFactory: (runner: AgentRunner, store: PgAgentStore, cfg: AppConfig) =>
         new ApprovalExpiry({
-          store, runner, ttlMs: cfg.approvalTtlMinutes * 60_000,
+          store,
+          runner,
+          ttlMs: cfg.approvalTtlMinutes * 60_000,
           onError: (id, e) => new Logger('ApprovalExpiry').error(`Could not expire approval ${id}: ${e instanceof Error ? e.message : e}`),
         }),
     },

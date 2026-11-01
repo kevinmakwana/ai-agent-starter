@@ -3,9 +3,7 @@ import type { Request } from 'express';
 import type { AppConfig } from '../config';
 import { APP_CONFIG } from '../tokens';
 import { CUSTOMER_COOKIE, readCookie } from './cookie';
-import {
-  KEEP_UNUSED_LINKS, LINK_TTL_MINUTES, LINKS_PER_HOUR, type CustomerAuthStore, type CustomerIdentity,
-} from './customer.store';
+import { KEEP_UNUSED_LINKS, LINK_TTL_MINUTES, LINKS_PER_HOUR, type CustomerAuthStore, type CustomerIdentity } from './customer.store';
 import type { LoginMailer } from './login-mailer';
 import { hashToken, newToken } from './session-token';
 import { CUSTOMER_AUTH_STORE, LOGIN_MAILER } from './tokens';
@@ -51,7 +49,8 @@ export class CustomerAuthService implements OnApplicationShutdown {
   private async deliver(customer: CustomerIdentity, mailer: LoginMailer): Promise<void> {
     const token = newToken();
     const created = await this.store.createLoginLink(customer.id, hashToken(token), LINK_TTL_MINUTES, {
-      maxPerHour: LINKS_PER_HOUR, keepUnused: KEEP_UNUSED_LINKS,
+      maxPerHour: LINKS_PER_HOUR,
+      keepUnused: KEEP_UNUSED_LINKS,
     });
     if (!created) return;
     await mailer.sendLink(customer.email, `${this.cfg.customerLogin.appUrl}/login#token=${token}`, LINK_TTL_MINUTES);

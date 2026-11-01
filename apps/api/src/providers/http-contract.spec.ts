@@ -9,7 +9,11 @@ import { runSmoke } from './smoke';
 // Real HTTP round trips (no injected fetch) against a local server that speaks each vendor's wire format.
 // This checks URLs, headers and bodies over an actual socket; it does NOT replace a live-API smoke test.
 
-interface Seen { url: string; headers: IncomingMessage['headers']; body: any }
+interface Seen {
+  url: string;
+  headers: IncomingMessage['headers'];
+  body: any;
+}
 let server: Server;
 let base: string;
 let seen: Seen[] = [];
@@ -30,16 +34,33 @@ beforeAll(async () => {
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 });
 afterAll(() => new Promise((r) => server.close(r)));
-beforeEach(() => { seen = []; });
+beforeEach(() => {
+  seen = [];
+});
 
-const tools: ToolSpec[] = [{ name: 'get_order', description: 'd', inputSchema: { type: 'object', properties: { orderId: { type: 'integer' } } } }];
-const messages: ChatMessage[] = [{ role: 'system', content: 'sys' }, { role: 'user', content: 'where is order 5?' }];
+const tools: ToolSpec[] = [
+  { name: 'get_order', description: 'd', inputSchema: { type: 'object', properties: { orderId: { type: 'integer' } } } },
+];
+const messages: ChatMessage[] = [
+  { role: 'system', content: 'sys' },
+  { role: 'user', content: 'where is order 5?' },
+];
 
 it('OpenAI adapter: POST /chat/completions with bearer auth and tool definitions', async () => {
-  reply = () => ({ status: 200, body: {
-    choices: [{ message: { content: null, tool_calls: [{ id: 'c1', type: 'function', function: { name: 'get_order', arguments: '{"orderId":5}' } }] } }],
-    usage: { prompt_tokens: 9, completion_tokens: 4 },
-  } });
+  reply = () => ({
+    status: 200,
+    body: {
+      choices: [
+        {
+          message: {
+            content: null,
+            tool_calls: [{ id: 'c1', type: 'function', function: { name: 'get_order', arguments: '{"orderId":5}' } }],
+          },
+        },
+      ],
+      usage: { prompt_tokens: 9, completion_tokens: 4 },
+    },
+  });
   const out = await new OpenAiProvider({ apiKey: 'sk-test', model: 'm', baseUrl: `${base}/v1` }).complete(messages, tools);
   expect(out.toolCalls).toEqual([{ id: 'c1', name: 'get_order', args: { orderId: 5 } }]);
   expect(seen[0].url).toBe('/v1/chat/completions');
@@ -48,7 +69,13 @@ it('OpenAI adapter: POST /chat/completions with bearer auth and tool definitions
 });
 
 it('Anthropic adapter: POST /v1/messages with x-api-key, version header and input_schema', async () => {
-  reply = () => ({ status: 200, body: { content: [{ type: 'tool_use', id: 'u1', name: 'get_order', input: { orderId: 5 } }], usage: { input_tokens: 8, output_tokens: 3 } } });
+  reply = () => ({
+    status: 200,
+    body: {
+      content: [{ type: 'tool_use', id: 'u1', name: 'get_order', input: { orderId: 5 } }],
+      usage: { input_tokens: 8, output_tokens: 3 },
+    },
+  });
   const out = await new AnthropicProvider({ apiKey: 'ak-test', model: 'm', baseUrl: base }).complete(messages, tools);
   expect(out.toolCalls).toEqual([{ id: 'u1', name: 'get_order', args: { orderId: 5 } }]);
   expect(seen[0].url).toBe('/v1/messages');
@@ -68,16 +95,36 @@ it('keeps the upstream error body out of the client-facing message', async () =>
 });
 
 it('maps connection failures to UpstreamLlmError', async () => {
-  const err = await new AnthropicProvider({ apiKey: 'x', model: 'm', baseUrl: 'http://127.0.0.1:1' }).complete(messages, tools).catch((e) => e);
+  const err = await new AnthropicProvider({ apiKey: 'x', model: 'm', baseUrl: 'http://127.0.0.1:1' })
+    .complete(messages, tools)
+    .catch((e) => e);
   expect(err).toBeInstanceOf(UpstreamLlmError);
   expect(err.message).toContain('could not reach');
 });
 
 describe('live smoke script (runSmoke), exercised against the local servers', () => {
   const quiet = () => undefined;
-  const anthropicTool = { content: [{ type: 'tool_use', id: 'u1', name: 'get_order', input: { orderId: 1 } }], stop_reason: 'tool_use', usage: { input_tokens: 5, output_tokens: 2 } };
-  const anthropicDone = { content: [{ type: 'text', text: 'Order #1 has shipped.' }], stop_reason: 'end_turn', usage: { input_tokens: 9, output_tokens: 6 } };
-  const openAiTool = { choices: [{ message: { content: null, tool_calls: [{ id: 'c1', type: 'function', function: { name: 'get_order', arguments: '{"orderId":1}' } }] }, finish_reason: 'tool_calls' }] };
+  const anthropicTool = {
+    content: [{ type: 'tool_use', id: 'u1', name: 'get_order', input: { orderId: 1 } }],
+    stop_reason: 'tool_use',
+    usage: { input_tokens: 5, output_tokens: 2 },
+  };
+  const anthropicDone = {
+    content: [{ type: 'text', text: 'Order #1 has shipped.' }],
+    stop_reason: 'end_turn',
+    usage: { input_tokens: 9, output_tokens: 6 },
+  };
+  const openAiTool = {
+    choices: [
+      {
+        message: {
+          content: null,
+          tool_calls: [{ id: 'c1', type: 'function', function: { name: 'get_order', arguments: '{"orderId":1}' } }],
+        },
+        finish_reason: 'tool_calls',
+      },
+    ],
+  };
   const openAiDone = { choices: [{ message: { content: 'Order #1 has shipped.' }, finish_reason: 'stop' }] };
 
   it('Anthropic: asks, runs the tool-call round trip with the result fed back, and gets a final answer', async () => {
@@ -105,7 +152,10 @@ describe('live smoke script (runSmoke), exercised against the local servers', ()
   });
 
   it('fails when the tool call arguments do not satisfy the real tool schema', async () => {
-    reply = () => ({ status: 200, body: { ...anthropicTool, content: [{ type: 'tool_use', id: 'u1', name: 'get_order', input: { orderId: 'one' } }] } });
+    reply = () => ({
+      status: 200,
+      body: { ...anthropicTool, content: [{ type: 'tool_use', id: 'u1', name: 'get_order', input: { orderId: 'one' } }] },
+    });
     await expect(runSmoke(new AnthropicProvider({ apiKey: 'k', model: 'm', baseUrl: base }), quiet)).rejects.toThrow(/arguments/i);
   });
 

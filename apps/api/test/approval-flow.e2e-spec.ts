@@ -41,13 +41,19 @@ maybe('approval flow (e2e, real Postgres)', () => {
     beforeEach(() => boot());
 
     it('reports health', async () => {
-      await http().get('/health').expect(200).expect({ status: 'ok', db: 'up', provider: 'mock', reviewerAuth: false, reviewerAccounts: false, customerLogin: false });
+      await http()
+        .get('/health')
+        .expect(200)
+        .expect({ status: 'ok', db: 'up', provider: 'mock', reviewerAuth: false, reviewerAccounts: false, customerLogin: false });
     });
 
     it('lookup -> refund request -> pending approval -> approve -> refund recorded', async () => {
       const id = await newConversation(1);
 
-      const sent = await http().post(`/conversations/${id}/messages`).send({ content: 'Order #1 arrived damaged, please refund it' }).expect(201);
+      const sent = await http()
+        .post(`/conversations/${id}/messages`)
+        .send({ content: 'Order #1 arrived damaged, please refund it' })
+        .expect(201);
       expect(sent.body.run.status).toBe('awaiting_approval');
       const { rows: before } = await pool.query('SELECT count(*)::int AS n FROM refunds WHERE order_id = 1');
       expect(before[0].n).toBe(0); // nothing refunded before approval
@@ -59,8 +65,12 @@ maybe('approval flow (e2e, real Postgres)', () => {
       expect(pending.body).toHaveLength(1);
       const approval = pending.body[0];
       expect(approval).toMatchObject({
-        toolName: 'issue_refund', status: 'pending_approval', customerEmail: 'ava.brooks@example.com',
-        toolArgs: { orderId: 1, amount: 18.75 }, orderTotal: 18.75, orderRefunded: 0,
+        toolName: 'issue_refund',
+        status: 'pending_approval',
+        customerEmail: 'ava.brooks@example.com',
+        toolArgs: { orderId: 1, amount: 18.75 },
+        orderTotal: 18.75,
+        orderRefunded: 0,
       });
       expect(approval.reasoning).toContain('human approval');
 
@@ -75,7 +85,12 @@ maybe('approval flow (e2e, real Postgres)', () => {
       const trace = await http().get(`/conversations/${id}`).expect(200);
       const steps = trace.body.runs[0].steps;
       expect(steps.map((s: any) => `${s.role}:${s.toolName ?? ''}`)).toEqual([
-        'user:', 'assistant:get_order', 'tool:get_order', 'assistant:issue_refund', 'tool:issue_refund', 'assistant:',
+        'user:',
+        'assistant:get_order',
+        'tool:get_order',
+        'assistant:issue_refund',
+        'tool:issue_refund',
+        'assistant:',
       ]);
       expect(steps[1].latencyMs).not.toBeNull();
       expect(steps.at(-1).content).toContain('approved and issued');
@@ -293,10 +308,16 @@ maybe('approval flow (e2e, real Postgres)', () => {
       const id = await newConversation(1);
       await http().post(`/conversations/${id}/messages`).send({ content: '' }).expect(400);
       await http().post(`/conversations/${id}/messages`).send({ content: '   \n\t ' }).expect(400); // nothing for the model to read
-      await http().post(`/conversations/${id}/messages`).send({ content: 'a'.repeat(2001) }).expect(400);
+      await http()
+        .post(`/conversations/${id}/messages`)
+        .send({ content: 'a'.repeat(2001) })
+        .expect(400);
       await http().post(`/conversations/${id}/messages`).send({ content: 'null byte \u0000 inside' }).expect(400); // Postgres text cannot hold NUL
       await http().post('/conversations').send({ customerId: 1, title: 'bad \u0000 title' }).expect(400);
-      await http().post('/conversations').send({ customerId: 2 ** 31 }).expect(400); // beyond the integer column
+      await http()
+        .post('/conversations')
+        .send({ customerId: 2 ** 31 })
+        .expect(400); // beyond the integer column
       await http().post(`/conversations/${id}/messages`).send({ content: 'hi', role: 'system' }).expect(400);
       await http().get('/approvals?status=bogus').expect(400);
       await http().post('/approvals/not-a-uuid').send({ decision: 'approve' }).expect(400);
@@ -308,8 +329,13 @@ maybe('approval flow (e2e, real Postgres)', () => {
 
   describe('with REVIEWER_API_KEY set', () => {
     const reviewer = { Authorization: 'Bearer s3cret' };
-    beforeEach(() => { process.env.REVIEWER_API_KEY = 's3cret'; return boot(); });
-    afterEach(() => { delete process.env.REVIEWER_API_KEY; });
+    beforeEach(() => {
+      process.env.REVIEWER_API_KEY = 's3cret';
+      return boot();
+    });
+    afterEach(() => {
+      delete process.env.REVIEWER_API_KEY;
+    });
 
     const start = async (customerId: number) => {
       const res = await http().post('/conversations').send({ customerId }).expect(201);
@@ -317,7 +343,10 @@ maybe('approval flow (e2e, real Postgres)', () => {
     };
 
     it('locks reviewer routes behind the key', async () => {
-      await http().get('/health').expect(200).expect((r) => expect(r.body.reviewerAuth).toBe(true));
+      await http()
+        .get('/health')
+        .expect(200)
+        .expect((r) => expect(r.body.reviewerAuth).toBe(true));
       for (const path of ['/approvals', '/customers', '/conversations']) {
         await http().get(path).expect(401);
         await http().get(path).set('Authorization', 'Bearer wrong').expect(401);
@@ -361,10 +390,15 @@ maybe('approval flow (e2e, real Postgres)', () => {
   });
 
   describe('with a slow provider', () => {
-    beforeEach(() => boot({
-      name: 'slow',
-      complete: async () => { await new Promise((r) => setTimeout(r, 200)); return { text: 'hi', toolCalls: [] }; },
-    }));
+    beforeEach(() =>
+      boot({
+        name: 'slow',
+        complete: async () => {
+          await new Promise((r) => setTimeout(r, 200));
+          return { text: 'hi', toolCalls: [] };
+        },
+      }),
+    );
 
     it('lets only one of two simultaneous messages run, without interleaving steps', async () => {
       const id = await newConversation(1);
@@ -384,7 +418,10 @@ maybe('approval flow (e2e, real Postgres)', () => {
       process.env.REVIEWER_API_KEY = 's3cret';
       return boot();
     });
-    afterEach(() => { delete process.env.CONVERSATION_TOKEN_BUDGET; delete process.env.REVIEWER_API_KEY; });
+    afterEach(() => {
+      delete process.env.CONVERSATION_TOKEN_BUDGET;
+      delete process.env.REVIEWER_API_KEY;
+    });
 
     it('reports usage per run and conversation, then stops the agent once the budget is spent', async () => {
       const res = await http().post('/conversations').send({ customerId: 1 }).expect(201);
@@ -396,15 +433,21 @@ maybe('approval flow (e2e, real Postgres)', () => {
 
       const second = await send('and again').expect(201);
       expect(second.body.run).toMatchObject({ status: 'budget_exceeded', modelCalls: 0 });
-      expect(second.body.run.steps.at(-1)).toMatchObject({ result: { code: 'TOKEN_BUDGET' }, content: expect.stringContaining('usage limit') });
+      expect(second.body.run.steps.at(-1)).toMatchObject({
+        result: { code: 'TOKEN_BUDGET' },
+        content: expect.stringContaining('usage limit'),
+      });
 
       const trace = (await http().get(`/conversations/${id}`).set(token).expect(200)).body;
       const sum = (key: 'inputTokens' | 'outputTokens') =>
         trace.runs.flatMap((r: any) => r.steps).reduce((n: number, st: any) => n + (st[key] ?? 0), 0);
       expect(sum('inputTokens')).toBeGreaterThan(0);
       expect(trace.usage).toEqual({
-        inputTokens: sum('inputTokens'), outputTokens: sum('outputTokens'),
-        totalTokens: sum('inputTokens') + sum('outputTokens'), cachedInputTokens: 0, budget: 1,
+        inputTokens: sum('inputTokens'),
+        outputTokens: sum('outputTokens'),
+        totalTokens: sum('inputTokens') + sum('outputTokens'),
+        cachedInputTokens: 0,
+        budget: 1,
       });
       expect(trace.runs[0].usage.totalTokens).toBe(trace.usage.totalTokens); // all spent in the first run
       expect(trace.runs[1].usage).toEqual({ inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedInputTokens: 0 });
@@ -415,10 +458,13 @@ maybe('approval flow (e2e, real Postgres)', () => {
   });
 
   describe('with a provider that reports cache hits', () => {
-    beforeEach(() => boot({
-      name: 'cached', model: 'cached-1',
-      complete: async () => ({ text: 'hi', toolCalls: [], usage: { inputTokens: 1000, outputTokens: 20, cachedInputTokens: 900 } }),
-    }));
+    beforeEach(() =>
+      boot({
+        name: 'cached',
+        model: 'cached-1',
+        complete: async () => ({ text: 'hi', toolCalls: [], usage: { inputTokens: 1000, outputTokens: 20, cachedInputTokens: 900 } }),
+      }),
+    );
 
     it('stores cached prompt tokens per step and reports them in the usage totals', async () => {
       const id = await newConversation(1);
@@ -438,9 +484,16 @@ maybe('approval flow (e2e, real Postgres)', () => {
     const internal = 'connect ECONNREFUSED 10.0.0.5:5432 (db-primary.internal)';
     beforeEach(() => {
       process.env.REVIEWER_API_KEY = 's3cret';
-      return boot({ name: 'broken', complete: async () => { throw new Error(internal); } });
+      return boot({
+        name: 'broken',
+        complete: async () => {
+          throw new Error(internal);
+        },
+      });
     });
-    afterEach(() => { delete process.env.REVIEWER_API_KEY; });
+    afterEach(() => {
+      delete process.env.REVIEWER_API_KEY;
+    });
 
     it('shows customers a generic error and reviewers the real one', async () => {
       const res = await http().post('/conversations').send({ customerId: 1 }).expect(201);
@@ -458,12 +511,23 @@ maybe('approval flow (e2e, real Postgres)', () => {
   });
 
   describe('when the upstream LLM fails', () => {
-    beforeEach(() => boot({ name: 'down', complete: async () => { throw new UpstreamLlmError('openai', 'HTTP 503 overloaded'); } }));
+    beforeEach(() =>
+      boot({
+        name: 'down',
+        complete: async () => {
+          throw new UpstreamLlmError('openai', 'HTTP 503 overloaded');
+        },
+      }),
+    );
 
     it('returns 502 with a clear message and marks the run failed', async () => {
       const id = await newConversation(1);
       const res = await http().post(`/conversations/${id}/messages`).send({ content: 'hi' }).expect(502);
-      expect(res.body).toMatchObject({ statusCode: 502, error: 'Bad Gateway', message: expect.stringContaining('Upstream LLM error (openai)') });
+      expect(res.body).toMatchObject({
+        statusCode: 502,
+        error: 'Bad Gateway',
+        message: expect.stringContaining('Upstream LLM error (openai)'),
+      });
       const trace = await http().get(`/conversations/${id}`).expect(200);
       expect(trace.body.runs[0]).toMatchObject({ status: 'failed', error: expect.stringContaining('overloaded') });
     });

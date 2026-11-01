@@ -10,10 +10,26 @@ function fakeBus() {
   const listeners = new Set<(e: AgentEvent) => void>();
   const closers = new Set<() => void>();
   const bus = {
-    subscribe: (l: (e: AgentEvent) => void) => { listeners.add(l); return () => { listeners.delete(l); }; },
-    onClosing: (cb: () => void) => { closers.add(cb); return () => { closers.delete(cb); }; },
+    subscribe: (l: (e: AgentEvent) => void) => {
+      listeners.add(l);
+      return () => {
+        listeners.delete(l);
+      };
+    },
+    onClosing: (cb: () => void) => {
+      closers.add(cb);
+      return () => {
+        closers.delete(cb);
+      };
+    },
   } as unknown as StreamBus;
-  return { bus, listeners, closers, emit: (e: AgentEvent) => listeners.forEach((l) => l(e)), close: () => [...closers].forEach((c) => c()) };
+  return {
+    bus,
+    listeners,
+    closers,
+    emit: (e: AgentEvent) => listeners.forEach((l) => l(e)),
+    close: () => [...closers].forEach((c) => c()),
+  };
 }
 
 const open = (over: Partial<Parameters<typeof eventStream>[0]> & { bus: StreamBus; limiter: StreamLimiter }) =>
@@ -26,7 +42,9 @@ describe('eventStream', () => {
   it('commits headers at once with a comment, then forwards accepted events as typed JSON', () => {
     const { bus, emit } = fakeBus();
     const out: MessageEvent[] = [];
-    const sub = open({ bus, limiter: new StreamLimiter(), accept: (e) => e.kind === 'trace' && e.conversationId === 'A' }).subscribe((m) => out.push(m));
+    const sub = open({ bus, limiter: new StreamLimiter(), accept: (e) => e.kind === 'trace' && e.conversationId === 'A' }).subscribe((m) =>
+      out.push(m),
+    );
     expect(out).toEqual([{ comment: 'connected' }]);
 
     emit({ kind: 'trace', conversationId: 'A' });
@@ -61,7 +79,11 @@ describe('eventStream', () => {
     expect(listeners.size).toBe(2);
 
     let error: unknown;
-    open({ bus, limiter, max: 2 }).subscribe({ error: (e) => { error = e; } });
+    open({ bus, limiter, max: 2 }).subscribe({
+      error: (e) => {
+        error = e;
+      },
+    });
     expect(error).toBeInstanceOf(HttpException);
     expect((error as HttpException).getStatus()).toBe(429);
     expect(listeners.size).toBe(2);
@@ -81,7 +103,11 @@ describe('eventStream', () => {
     const { bus, listeners, closers, close } = fakeBus();
     const limiter = new StreamLimiter();
     let completed = false;
-    open({ bus, limiter, max: 1 }).subscribe({ complete: () => { completed = true; } });
+    open({ bus, limiter, max: 1 }).subscribe({
+      complete: () => {
+        completed = true;
+      },
+    });
     expect(completed).toBe(false);
     expect(closers.size).toBe(1);
 
@@ -101,7 +127,11 @@ describe('eventStream', () => {
     const limiter = new StreamLimiter();
     const subs = [open({ bus, limiter, key: 'A', max: 1 }).subscribe(), open({ bus, limiter, key: 'B', max: 1 }).subscribe()];
     let error: unknown;
-    open({ bus, limiter, key: 'A', max: 1 }).subscribe({ error: (e) => { error = e; } });
+    open({ bus, limiter, key: 'A', max: 1 }).subscribe({
+      error: (e) => {
+        error = e;
+      },
+    });
     expect(error).toBeInstanceOf(HttpException);
     subs.forEach((s) => s.unsubscribe());
   });

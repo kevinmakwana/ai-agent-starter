@@ -14,7 +14,10 @@ import { limitedCustomerLogin } from './rate-limit';
 @Controller('customer-auth')
 @UseGuards(LoginEnabledGuard, CsrfHeaderGuard)
 export class CustomerAuthController {
-  constructor(private readonly auth: CustomerAuthService, @Inject(APP_CONFIG) private readonly cfg: AppConfig) {}
+  constructor(
+    private readonly auth: CustomerAuthService,
+    @Inject(APP_CONFIG) private readonly cfg: AppConfig,
+  ) {}
 
   /** Always the same answer; mail goes out afterwards, and only to a real customer. */
   @Post('request')

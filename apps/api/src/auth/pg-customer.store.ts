@@ -9,14 +9,21 @@ export class PgCustomerAuthStore implements CustomerAuthStore {
     return rows[0] ?? null;
   }
 
-  async createLoginLink(customerId: number, tokenHash: string, ttlMinutes: number, limits: { maxPerHour: number; keepUnused: number }): Promise<boolean> {
+  async createLoginLink(
+    customerId: number,
+    tokenHash: string,
+    ttlMinutes: number,
+    limits: { maxPerHour: number; keepUnused: number },
+  ): Promise<boolean> {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
       // One lock per customer, so counting and inserting are one decision even for simultaneous requests.
       await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`login-link:${customerId}`]);
       const { rows } = await client.query(
-        `SELECT count(*)::int AS n FROM login_links WHERE customer_id = $1 AND created_at > now() - interval '1 hour'`, [customerId]);
+        `SELECT count(*)::int AS n FROM login_links WHERE customer_id = $1 AND created_at > now() - interval '1 hour'`,
+        [customerId],
+      );
       if (rows[0].n >= limits.maxPerHour) {
         await client.query('ROLLBACK');
         return false;
@@ -72,7 +79,9 @@ export class PgCustomerAuthStore implements CustomerAuthStore {
     if (!rows[0]) return null;
     // at most one write a minute per session
     await this.pool.query(
-      `UPDATE customer_sessions SET last_seen_at = now() WHERE token_hash = $1 AND last_seen_at < now() - interval '1 minute'`, [tokenHash]);
+      `UPDATE customer_sessions SET last_seen_at = now() WHERE token_hash = $1 AND last_seen_at < now() - interval '1 minute'`,
+      [tokenHash],
+    );
     return rows[0];
   }
 
@@ -85,8 +94,9 @@ export class PgCustomerAuthStore implements CustomerAuthStore {
   }
 
   async deleteExpired(): Promise<void> {
-    await this.pool.query(
-      'DELETE FROM customer_sessions WHERE expires_at <= now() OR last_seen_at <= now() - make_interval(hours => $1)', [CUSTOMER_IDLE_HOURS]);
+    await this.pool.query('DELETE FROM customer_sessions WHERE expires_at <= now() OR last_seen_at <= now() - make_interval(hours => $1)', [
+      CUSTOMER_IDLE_HOURS,
+    ]);
     await this.pool.query(`DELETE FROM login_links WHERE expires_at < now() - interval '1 day'`);
   }
 }

@@ -58,7 +58,12 @@ describe('ApprovalExpiryScheduler', () => {
 
   it('keeps recovering when the expiry sweep fails', async () => {
     const recoverStranded = jest.fn(async () => none());
-    const s = new ApprovalExpiryScheduler(expiry(async () => { throw new Error('db down'); }, recoverStranded), cfg(60));
+    const s = new ApprovalExpiryScheduler(
+      expiry(async () => {
+        throw new Error('db down');
+      }, recoverStranded),
+      cfg(60),
+    );
     s.onModuleInit();
     await jest.advanceTimersByTimeAsync(60_000);
     expect(recoverStranded).toHaveBeenCalledTimes(1);

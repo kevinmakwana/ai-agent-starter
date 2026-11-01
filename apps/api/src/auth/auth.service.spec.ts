@@ -41,7 +41,11 @@ describe('resolvePrincipal: modes', () => {
     expect(await auth.resolvePrincipal(cookie('not-a-session'))).toEqual({ kind: 'none' });
     const { token } = await auth.login('a@example.com', PW);
     expect(await auth.resolvePrincipal(cookie(token))).toEqual({
-      kind: 'reviewer', id: expect.any(String), email: 'a@example.com', name: 'Alex', role: 'reviewer',
+      kind: 'reviewer',
+      id: expect.any(String),
+      email: 'a@example.com',
+      name: 'Alex',
+      role: 'reviewer',
     });
   });
 
@@ -79,7 +83,11 @@ describe('login', () => {
     const inactive = await add('off@example.com');
     await store.updateReviewer(inactive.id, { active: false });
     const messages: string[] = [];
-    for (const [email, pw] of [['nobody@example.com', PW], ['a@example.com', 'wrong password!!'], ['off@example.com', PW]]) {
+    for (const [email, pw] of [
+      ['nobody@example.com', PW],
+      ['a@example.com', 'wrong password!!'],
+      ['off@example.com', PW],
+    ]) {
       const err = await auth.login(email, pw).catch((e) => e);
       expect(err).toBeInstanceOf(UnauthorizedException);
       messages.push(err.message);
@@ -153,7 +161,9 @@ describe('logout and change password', () => {
     const r = await add();
     const one = await auth.login('a@example.com', PW);
     const two = await auth.login('a@example.com', PW);
-    await expect(auth.changePassword(r.id, 'not the password', 'a brand new password', one.token)).rejects.toThrow('Current password is incorrect');
+    await expect(auth.changePassword(r.id, 'not the password', 'a brand new password', one.token)).rejects.toThrow(
+      'Current password is incorrect',
+    );
     await expect(auth.changePassword(r.id, PW, 'short', one.token)).rejects.toThrow(/at least 12/);
     await auth.changePassword(r.id, PW, 'a brand new password', one.token);
     expect(await auth.resolvePrincipal(cookie(one.token))).toMatchObject({ kind: 'reviewer' });

@@ -10,7 +10,15 @@ export interface LoginMailer {
 const CODE = /^[A-Z0-9_]{1,32}$/;
 
 /** The sign-in mail: plain text, the link and its lifetime, no customer data. Failures carry at most an error code. */
-export function createLoginMailer({ smtpUrl, from, transport }: { smtpUrl: string; from: string; transport?: nodemailer.Transporter }): LoginMailer {
+export function createLoginMailer({
+  smtpUrl,
+  from,
+  transport,
+}: {
+  smtpUrl: string;
+  from: string;
+  transport?: nodemailer.Transporter;
+}): LoginMailer {
   const transporter = transport ?? createSmtpTransport(smtpUrl);
   return {
     async sendLink(to, link, ttlMinutes) {

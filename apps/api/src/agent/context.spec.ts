@@ -4,8 +4,20 @@ import type { Step } from './types';
 const conv = { customerName: 'Ava Brooks', customerEmail: 'ava.brooks@example.com' };
 let n = 0;
 const step = (s: Partial<Step> & Pick<Step, 'role'>): Step => ({
-  id: ++n, runId: 'r', conversationId: 'c', content: null, toolName: null, toolArgs: null, toolCallId: null,
-  result: null, latencyMs: null, inputTokens: null, outputTokens: null, cachedInputTokens: null, createdAt: '', ...s,
+  id: ++n,
+  runId: 'r',
+  conversationId: 'c',
+  content: null,
+  toolName: null,
+  toolArgs: null,
+  toolCallId: null,
+  result: null,
+  latencyMs: null,
+  inputTokens: null,
+  outputTokens: null,
+  cachedInputTokens: null,
+  createdAt: '',
+  ...s,
 });
 const user = (content: string) => step({ role: 'user', content });
 const answer = (content: string) => step({ role: 'assistant', content });
@@ -28,11 +40,24 @@ describe('buildMessages', () => {
 
   describe('with a context cap', () => {
     const history = () => [
-      user(big('one')), call('1'), result('1'), answer('a1'),
-      user(big('two')), call('2'), result('2'), answer('a2'),
-      user(big('three')), call('3'), result('3'), answer('a3'),
-      user(big('four')), call('4'), result('4'), answer('a4'),
-      user(big('five')), call('5'),
+      user(big('one')),
+      call('1'),
+      result('1'),
+      answer('a1'),
+      user(big('two')),
+      call('2'),
+      result('2'),
+      answer('a2'),
+      user(big('three')),
+      call('3'),
+      result('3'),
+      answer('a3'),
+      user(big('four')),
+      call('4'),
+      result('4'),
+      answer('a4'),
+      user(big('five')),
+      call('5'),
     ];
 
     it('keeps only the newest turns that fit, and tells the model older ones were left out', () => {

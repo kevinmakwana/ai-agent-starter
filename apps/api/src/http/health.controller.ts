@@ -8,7 +8,11 @@ import { APP_CONFIG, PG_POOL } from '../tokens';
 @SkipThrottle()
 @Controller('health')
 export class HealthController {
-  constructor(@Inject(PG_POOL) private readonly pool: Pool, @Inject(APP_CONFIG) private readonly cfg: AppConfig, private readonly auth: AuthService) {}
+  constructor(
+    @Inject(PG_POOL) private readonly pool: Pool,
+    @Inject(APP_CONFIG) private readonly cfg: AppConfig,
+    private readonly auth: AuthService,
+  ) {}
 
   @Get()
   async check() {
@@ -18,6 +22,13 @@ export class HealthController {
       throw new ServiceUnavailableException({ status: 'error', db: 'down', provider: this.cfg.provider });
     }
     const reviewerAccounts = await this.auth.isAccountsMode();
-    return { status: 'ok', db: 'up', provider: this.cfg.provider, reviewerAuth: Boolean(this.cfg.reviewerApiKey) || reviewerAccounts, reviewerAccounts, customerLogin: this.cfg.customerLogin.enabled };
+    return {
+      status: 'ok',
+      db: 'up',
+      provider: this.cfg.provider,
+      reviewerAuth: Boolean(this.cfg.reviewerApiKey) || reviewerAccounts,
+      reviewerAccounts,
+      customerLogin: this.cfg.customerLogin.enabled,
+    };
   }
 }

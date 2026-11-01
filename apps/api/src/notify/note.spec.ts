@@ -5,14 +5,27 @@ const CONSOLE = 'https://console.example.com/reviewer';
 const ALLOWED = ['amount', 'consoleUrl', 'createdAt', 'id', 'orderId', 'rule', 'tool'];
 
 const row = (over: Partial<ClaimedAction> = {}): ClaimedAction => ({
-  id: 'a1', toolName: 'issue_refund', toolArgs: { orderId: 11, amount: 18.754 }, createdAt: '2026-10-29T10:00:00.000Z', rule: 'always_review', ...over,
+  id: 'a1',
+  toolName: 'issue_refund',
+  toolArgs: { orderId: 11, amount: 18.754 },
+  createdAt: '2026-10-29T10:00:00.000Z',
+  rule: 'always_review',
+  ...over,
 });
 
 describe('buildNote', () => {
   it('builds the allowed fields from a refund and never leaks the free-text reason', () => {
     const r = row({ toolArgs: { orderId: 11, amount: 18.754, reason: 'mail me at ava@example.com' } });
     const note = buildNote(r, CONSOLE);
-    expect(note).toEqual({ id: 'a1', tool: 'issue_refund', orderId: 11, amount: 18.75, rule: 'always_review', createdAt: r.createdAt, consoleUrl: CONSOLE });
+    expect(note).toEqual({
+      id: 'a1',
+      tool: 'issue_refund',
+      orderId: 11,
+      amount: 18.75,
+      rule: 'always_review',
+      createdAt: r.createdAt,
+      consoleUrl: CONSOLE,
+    });
     expect(Object.keys(note).sort()).toEqual(ALLOWED);
     expect(JSON.stringify(note)).not.toContain('ava@example.com');
     expect(JSON.stringify(note)).not.toContain('reason');
@@ -45,7 +58,12 @@ describe('buildNote', () => {
     expect(buildNote(row({ toolArgs: { orderId: 11, amount } }), CONSOLE)).not.toHaveProperty('amount');
   });
 
-  it.each([['too long', 'x'.repeat(500)], ['markup', '<b>'], ['empty', ''], ['null', null]])('omits a rule that is %s', (_label, rule) => {
+  it.each([
+    ['too long', 'x'.repeat(500)],
+    ['markup', '<b>'],
+    ['empty', ''],
+    ['null', null],
+  ])('omits a rule that is %s', (_label, rule) => {
     expect(buildNote(row({ rule }), CONSOLE)).not.toHaveProperty('rule');
   });
 
@@ -55,7 +73,11 @@ describe('buildNote', () => {
     expect(buildNote(row({ toolArgs: { orderId: 11, amount: 9999999.99 } }), CONSOLE).amount).toBe(9999999.99);
   });
 
-  it.each([['null', null], ['an array', [1, 2]], ['a number', 5]])('copes with toolArgs that is %s', (_label, toolArgs) => {
+  it.each([
+    ['null', null],
+    ['an array', [1, 2]],
+    ['a number', 5],
+  ])('copes with toolArgs that is %s', (_label, toolArgs) => {
     const note = buildNote(row({ toolArgs: toolArgs as unknown as Record<string, unknown> }), CONSOLE);
     expect(Object.keys(note).sort()).toEqual(['consoleUrl', 'createdAt', 'id', 'rule', 'tool']);
   });

@@ -6,11 +6,20 @@ import { webhookChannel } from './webhook.channel';
 import type { ApprovalNote } from './types';
 
 const note = (over: Partial<ApprovalNote> = {}): ApprovalNote => ({
-  id: 'a1', tool: 'issue_refund', orderId: 11, amount: 18.75, rule: 'always_review',
-  createdAt: '2026-10-29T10:00:00.000Z', consoleUrl: 'https://console.example.com/reviewer', ...over,
+  id: 'a1',
+  tool: 'issue_refund',
+  orderId: 11,
+  amount: 18.75,
+  rule: 'always_review',
+  createdAt: '2026-10-29T10:00:00.000Z',
+  consoleUrl: 'https://console.example.com/reviewer',
+  ...over,
 });
 
-interface Call { url: string; init: RequestInit }
+interface Call {
+  url: string;
+  init: RequestInit;
+}
 
 /** A fetch that records its calls and answers with the given status. */
 function fakeFetch(status = 200) {
@@ -23,7 +32,10 @@ function fakeFetch(status = 200) {
   return { fetchFn, calls, cancel };
 }
 
-const throwing = (err: Error) => (async () => { throw err; }) as unknown as typeof fetch;
+const throwing = (err: Error) =>
+  (async () => {
+    throw err;
+  }) as unknown as typeof fetch;
 const signal = () => new AbortController().signal;
 
 describe('headline', () => {
@@ -103,7 +115,9 @@ describe('webhookChannel', () => {
     await webhookChannel({ url, secret: 's3cret', fetchFn, nowSec: () => 1_700_000_000 }).send(note(), signal());
     const { init } = calls[0];
     const headers = init.headers as Record<string, string>;
-    const expected = createHmac('sha256', 's3cret').update('1700000000.' + (init.body as string)).digest('hex');
+    const expected = createHmac('sha256', 's3cret')
+      .update('1700000000.' + (init.body as string))
+      .digest('hex');
     expect(headers['x-timestamp']).toBe('1700000000');
     expect(headers['x-signature']).toBe(`sha256=${expected}`);
   });
@@ -162,7 +176,9 @@ describe('postJson', () => {
   });
 
   it('reports a real aborted and a real timed-out signal as timed out', async () => {
-    const reject = (async (_u: string, i: RequestInit) => { throw i.signal?.reason; }) as unknown as typeof fetch;
+    const reject = (async (_u: string, i: RequestInit) => {
+      throw i.signal?.reason;
+    }) as unknown as typeof fetch;
     const timeout = AbortSignal.timeout(1);
     await new Promise((r) => setTimeout(r, 20));
     for (const sig of [AbortSignal.abort(), timeout]) {
@@ -171,7 +187,8 @@ describe('postJson', () => {
   });
 
   it.each(['TimeoutError', 'AbortError'])('reports %s as timed out', async (name) => {
-    const e = new Error('The operation was aborted'); e.name = name;
+    const e = new Error('The operation was aborted');
+    e.name = name;
     await expect(postJson(throwing(e), url, init)).rejects.toThrow('timed out');
   });
 });

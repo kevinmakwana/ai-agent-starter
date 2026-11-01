@@ -9,7 +9,10 @@ const AVA: CustomerIdentity = { id: 1, name: 'Ava', email: 'ava@example.com' };
 const reviewer: Principal = { kind: 'reviewer', id: 'r1', email: 'a@b.c', name: 'A', role: 'admin' };
 
 async function run(reviewerSide: Principal, customer: CustomerIdentity | null | Error, enabled = true) {
-  const resolve = jest.fn(async () => { if (customer instanceof Error) throw customer; return customer; });
+  const resolve = jest.fn(async () => {
+    if (customer instanceof Error) throw customer;
+    return customer;
+  });
   const auth = { resolvePrincipal: async () => reviewerSide } as unknown as AuthService;
   const customers = { enabled, resolve } as unknown as CustomerAuthService;
   const req = { headers: {} } as Request;

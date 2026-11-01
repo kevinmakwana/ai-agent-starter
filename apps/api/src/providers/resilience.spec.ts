@@ -4,7 +4,10 @@ import { AnthropicProvider } from './anthropic.provider';
 import { OpenAiProvider } from './openai.provider';
 
 const tools: ToolSpec[] = [{ name: 'get_order', description: 'd', inputSchema: { type: 'object' } }];
-const messages: ChatMessage[] = [{ role: 'system', content: 'sys' }, { role: 'user', content: 'order 1?' }];
+const messages: ChatMessage[] = [
+  { role: 'system', content: 'sys' },
+  { role: 'user', content: 'order 1?' },
+];
 
 const res = (status: number, body: unknown = {}, headers: Record<string, string> = {}) =>
   new Response(JSON.stringify(body), { status, headers });
@@ -32,24 +35,39 @@ interface Flavor {
 const anthropic: Flavor = {
   name: 'anthropic',
   make: (fetch, extra) => new AnthropicProvider({ apiKey: 'k', model: 'm', fetch, ...extra }),
-  ok: (text = 'hi') => res(200, { content: [{ type: 'text', text }], stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 } }),
-  toolCall: (stop = 'tool_use') => res(200, { content: [{ type: 'tool_use', id: 'u1', name: 'get_order', input: { orderId: 1 } }], stop_reason: stop }),
+  ok: (text = 'hi') =>
+    res(200, { content: [{ type: 'text', text }], stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 } }),
+  toolCall: (stop = 'tool_use') =>
+    res(200, { content: [{ type: 'tool_use', id: 'u1', name: 'get_order', input: { orderId: 1 } }], stop_reason: stop }),
   text: (text, stop) => res(200, { content: [{ type: 'text', text }], stop_reason: stop }),
   overloaded: 529,
 };
 const openai: Flavor = {
   name: 'openai',
   make: (fetch, extra) => new OpenAiProvider({ apiKey: 'k', model: 'm', baseUrl: 'https://x.test/v1', fetch, ...extra }),
-  ok: (text = 'hi') => res(200, { choices: [{ message: { content: text }, finish_reason: 'stop' }], usage: { prompt_tokens: 1, completion_tokens: 1 } }),
-  toolCall: (stop = 'tool_calls') => res(200, { choices: [{ message: { content: null, tool_calls: [{ id: 'c1', function: { name: 'get_order', arguments: '{"orderId":1}' } }] }, finish_reason: stop }] }),
+  ok: (text = 'hi') =>
+    res(200, { choices: [{ message: { content: text }, finish_reason: 'stop' }], usage: { prompt_tokens: 1, completion_tokens: 1 } }),
+  toolCall: (stop = 'tool_calls') =>
+    res(200, {
+      choices: [
+        {
+          message: { content: null, tool_calls: [{ id: 'c1', function: { name: 'get_order', arguments: '{"orderId":1}' } }] },
+          finish_reason: stop,
+        },
+      ],
+    }),
   text: (text, stop) => res(200, { choices: [{ message: { content: text }, finish_reason: stop }] }),
   overloaded: 503,
 };
 
 describe.each([anthropic, openai])('$name adapter: retries', (f) => {
   const delays: number[] = [];
-  const sleep = async (ms: number) => { delays.push(ms); };
-  beforeEach(() => { delays.length = 0; });
+  const sleep = async (ms: number) => {
+    delays.push(ms);
+  };
+  beforeEach(() => {
+    delays.length = 0;
+  });
 
   it('retries rate limits and server errors, then succeeds', async () => {
     const fetch = script(res(429), res(500), f.ok('finally'));
@@ -79,7 +97,10 @@ describe.each([anthropic, openai])('$name adapter: retries', (f) => {
 
   it('gives up after maxRetries and reports the last status', async () => {
     const fetch = script(res(f.overloaded), res(f.overloaded), res(f.overloaded), f.ok());
-    const err = await f.make(fetch, { maxRetries: 2, sleep }).complete(messages, tools).catch((e) => e);
+    const err = await f
+      .make(fetch, { maxRetries: 2, sleep })
+      .complete(messages, tools)
+      .catch((e) => e);
     expect(err).toBeInstanceOf(UpstreamLlmError);
     expect(err.message).toContain(`HTTP ${f.overloaded}`);
     expect(fetch).toHaveBeenCalledTimes(3);
@@ -100,7 +121,10 @@ describe.each([anthropic, openai])('$name adapter: retries', (f) => {
 
   it('does not wait out a Retry-After longer than its cap: the caller gets the error now', async () => {
     const fetch = script(res(429, {}, { 'retry-after': '120' }), f.ok());
-    const err = await f.make(fetch, { maxRetries: 2, maxDelayMs: 30_000, sleep }).complete(messages, tools).catch((e) => e);
+    const err = await f
+      .make(fetch, { maxRetries: 2, maxDelayMs: 30_000, sleep })
+      .complete(messages, tools)
+      .catch((e) => e);
     expect(err.message).toContain('HTTP 429');
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(delays).toEqual([]);
@@ -131,7 +155,10 @@ describe('truncated and declined responses are never executed', () => {
     ['openai: answer cut off by length', openai.text('Your order is on its wa', 'length'), openai, /cut off/],
     ['openai: content filter', openai.text('', 'content_filter'), openai, /declined/],
   ] as const)('%s', async (_name, response, f, message) => {
-    const err = await f.make(script(response)).complete(messages, tools).catch((e) => e);
+    const err = await f
+      .make(script(response))
+      .complete(messages, tools)
+      .catch((e) => e);
     expect(err).toBeInstanceOf(UpstreamLlmError);
     expect(err.message).toMatch(message);
   });
@@ -163,10 +190,13 @@ describe('token limits and caching', () => {
   });
 
   it('Anthropic: counts cached prompt tokens in the input total and reports cache reads separately', async () => {
-    const fetch = script(res(200, {
-      content: [{ type: 'text', text: 'hi' }], stop_reason: 'end_turn',
-      usage: { input_tokens: 10, cache_creation_input_tokens: 200, cache_read_input_tokens: 300, output_tokens: 5 },
-    }));
+    const fetch = script(
+      res(200, {
+        content: [{ type: 'text', text: 'hi' }],
+        stop_reason: 'end_turn',
+        usage: { input_tokens: 10, cache_creation_input_tokens: 200, cache_read_input_tokens: 300, output_tokens: 5 },
+      }),
+    );
     const out = await anthropic.make(fetch).complete(messages, tools);
     expect(out.usage).toEqual({ inputTokens: 510, outputTokens: 5, cachedInputTokens: 300 });
   });
@@ -188,10 +218,16 @@ describe('token limits and caching', () => {
   });
 
   it('OpenAI: reports cached prompt tokens', async () => {
-    const out = await openai.make(script(res(200, {
-      choices: [{ message: { content: 'hi' }, finish_reason: 'stop' }],
-      usage: { prompt_tokens: 400, completion_tokens: 6, prompt_tokens_details: { cached_tokens: 128 } },
-    }))).complete(messages, tools);
+    const out = await openai
+      .make(
+        script(
+          res(200, {
+            choices: [{ message: { content: 'hi' }, finish_reason: 'stop' }],
+            usage: { prompt_tokens: 400, completion_tokens: 6, prompt_tokens_details: { cached_tokens: 128 } },
+          }),
+        ),
+      )
+      .complete(messages, tools);
     expect(out.usage).toEqual({ inputTokens: 400, outputTokens: 6, cachedInputTokens: 128 });
   });
 });
@@ -199,20 +235,29 @@ describe('token limits and caching', () => {
 describe.each([anthropic, openai])('$name adapter: unusable responses', (f) => {
   it('maps a 200 that is not JSON (e.g. a proxy error page) to an upstream error, not a crash', async () => {
     const fetch = script(new Response('<html>Bad gateway</html>', { status: 200 }));
-    const err = await f.make(fetch).complete(messages, tools).catch((e) => e);
+    const err = await f
+      .make(fetch)
+      .complete(messages, tools)
+      .catch((e) => e);
     expect(err).toBeInstanceOf(UpstreamLlmError);
     expect(err.message).not.toContain('<html>');
   });
 
   it('maps a body that fails mid-read (timeout, reset) to an upstream error', async () => {
     const broken = new Response(new ReadableStream({ start: (c) => c.error(new Error('socket hang up')) }), { status: 200 });
-    const err = await f.make(script(broken)).complete(messages, tools).catch((e) => e);
+    const err = await f
+      .make(script(broken))
+      .complete(messages, tools)
+      .catch((e) => e);
     expect(err).toBeInstanceOf(UpstreamLlmError);
   });
 
   it('still reports the HTTP status when an error response body cannot be read', async () => {
     const broken = new Response(new ReadableStream({ start: (c) => c.error(new Error('reset')) }), { status: 400 });
-    const err = await f.make(script(broken)).complete(messages, tools).catch((e) => e);
+    const err = await f
+      .make(script(broken))
+      .complete(messages, tools)
+      .catch((e) => e);
     expect(err).toBeInstanceOf(UpstreamLlmError);
     expect(err.message).toContain('HTTP 400');
   });
@@ -220,8 +265,12 @@ describe.each([anthropic, openai])('$name adapter: unusable responses', (f) => {
 
 describe.each([anthropic, openai])('$name adapter: retry edge cases', (f) => {
   const delays: number[] = [];
-  const sleep = async (ms: number) => { delays.push(ms); };
-  beforeEach(() => { delays.length = 0; });
+  const sleep = async (ms: number) => {
+    delays.push(ms);
+  };
+  beforeEach(() => {
+    delays.length = 0;
+  });
 
   it('retries a request timeout (408)', async () => {
     const out = await f.make(script(res(408), f.ok('ok')), { maxRetries: 1, sleep }).complete(messages, tools);
@@ -237,18 +286,28 @@ describe.each([anthropic, openai])('$name adapter: retry edge cases', (f) => {
   });
 
   it('understands retry-after-ms and prefers it', async () => {
-    await f.make(script(res(429, {}, { 'retry-after-ms': '250', 'retry-after': '9' }), f.ok()), { maxRetries: 1, sleep }).complete(messages, tools);
+    await f
+      .make(script(res(429, {}, { 'retry-after-ms': '250', 'retry-after': '9' }), f.ok()), { maxRetries: 1, sleep })
+      .complete(messages, tools);
     expect(delays).toEqual([250]);
   });
 
   it('falls back to its own backoff when Retry-After is garbage or in the past', async () => {
-    await f.make(script(res(429, {}, { 'retry-after': 'soon' }), res(429, {}, { 'retry-after': 'Wed, 21 Oct 2015 07:28:00 GMT' }), f.ok()),
-      { maxRetries: 2, sleep, random: () => 0.5 }).complete(messages, tools);
+    await f
+      .make(script(res(429, {}, { 'retry-after': 'soon' }), res(429, {}, { 'retry-after': 'Wed, 21 Oct 2015 07:28:00 GMT' }), f.ok()), {
+        maxRetries: 2,
+        sleep,
+        random: () => 0.5,
+      })
+      .complete(messages, tools);
     expect(delays).toEqual([250, 0]); // garbage -> backoff; a date in the past -> retry now
   });
 
   it('reports a network failure on every attempt as an upstream error, keeping the cause out of the message', async () => {
-    const err = await f.make(script(new Error('ECONNRESET 10.0.0.5'), new Error('ECONNRESET 10.0.0.5')), { maxRetries: 1, sleep }).complete(messages, tools).catch((e) => e);
+    const err = await f
+      .make(script(new Error('ECONNRESET 10.0.0.5'), new Error('ECONNRESET 10.0.0.5')), { maxRetries: 1, sleep })
+      .complete(messages, tools)
+      .catch((e) => e);
     expect(err).toBeInstanceOf(UpstreamLlmError);
     expect(err.message).not.toContain('10.0.0.5');
     expect(err.detail).toContain('10.0.0.5');
@@ -257,9 +316,10 @@ describe.each([anthropic, openai])('$name adapter: retry edge cases', (f) => {
 
 describe.each([anthropic, openai])('$name adapter: odd but valid replies', (f) => {
   it('returns text-less, tool-less replies as empty (the agent decides what to do)', async () => {
-    const empty = f.name === 'anthropic'
-      ? res(200, { content: [], stop_reason: 'end_turn' })
-      : res(200, { choices: [{ message: { content: null }, finish_reason: 'stop' }] });
+    const empty =
+      f.name === 'anthropic'
+        ? res(200, { content: [], stop_reason: 'end_turn' })
+        : res(200, { choices: [{ message: { content: null }, finish_reason: 'stop' }] });
     expect(await f.make(script(empty)).complete(messages, tools)).toMatchObject({ text: undefined, toolCalls: [] });
   });
 

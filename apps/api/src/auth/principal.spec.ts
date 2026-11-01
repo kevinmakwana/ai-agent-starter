@@ -1,7 +1,8 @@
 import { customerOf, isReviewerPrincipal, principalOf, reviewerOf, type Principal } from './principal';
 
 const all: Record<string, Principal> = {
-  demo: { kind: 'demo' }, key: { kind: 'key' },
+  demo: { kind: 'demo' },
+  key: { kind: 'key' },
   reviewer: { kind: 'reviewer', id: 'r1', email: 'a@b.c', name: 'A', role: 'reviewer' },
   customer: { kind: 'customer', customerId: 1, email: 'ava@example.com', name: 'Ava' },
   none: { kind: 'none' },
@@ -9,7 +10,11 @@ const all: Record<string, Principal> = {
 
 describe('principals', () => {
   it('only demo, key and reviewer are reviewers: a customer and an anonymous caller are not', () => {
-    expect(Object.entries(all).filter(([, p]) => isReviewerPrincipal(p)).map(([k]) => k)).toEqual(['demo', 'key', 'reviewer']);
+    expect(
+      Object.entries(all)
+        .filter(([, p]) => isReviewerPrincipal(p))
+        .map(([k]) => k),
+    ).toEqual(['demo', 'key', 'reviewer']);
   });
 
   it('customerOf and reviewerOf only match their own kind', () => {

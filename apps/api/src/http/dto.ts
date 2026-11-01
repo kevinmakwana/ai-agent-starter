@@ -1,5 +1,19 @@
 import { Transform, Type } from 'class-transformer';
-import { IsBoolean, IsEmail, IsIn, IsInt, IsNotEmpty, IsOptional, IsString, IsUUID, Length, Matches, Max, MaxLength, Min } from 'class-validator';
+import {
+  IsBoolean,
+  IsEmail,
+  IsIn,
+  IsInt,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Length,
+  Matches,
+  Max,
+  MaxLength,
+  Min,
+} from 'class-validator';
 
 /** Postgres text and jsonb cannot hold NUL; refuse it at the edge instead of failing deep inside a run. */
 // eslint-disable-next-line no-control-regex -- matching NUL is the point
@@ -9,23 +23,35 @@ const trim = () => Transform(({ value }) => (typeof value === 'string' ? value.t
 
 export class CreateConversationDto {
   /** Login off: either customerId or email identifies who the conversation is bound to. Login on: neither is accepted. */
-  @IsOptional() @IsInt() @Min(1) @Max(2_147_483_647)
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(2_147_483_647)
   customerId?: number;
 
-  @IsOptional() @IsEmail()
+  @IsOptional()
+  @IsEmail()
   email?: string;
 
-  @IsOptional() @IsString() @MaxLength(120) @noNul()
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  @noNul()
   title?: string;
 }
 
 export class SendMessageDto {
-  @trim() @IsString() @IsNotEmpty() @Length(1, 2000) @noNul()
+  @trim()
+  @IsString()
+  @IsNotEmpty()
+  @Length(1, 2000)
+  @noNul()
   content!: string;
 }
 
 export class ListApprovalsQuery {
-  @IsOptional() @IsIn(['pending', 'approved', 'rejected', 'all'])
+  @IsOptional()
+  @IsIn(['pending', 'approved', 'rejected', 'all'])
   status?: 'pending' | 'approved' | 'rejected' | 'all';
 }
 
@@ -33,19 +59,31 @@ export class DecideApprovalDto {
   @IsIn(['approve', 'reject'])
   decision!: 'approve' | 'reject';
 
-  @IsOptional() @IsString() @MaxLength(500) @noNul()
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  @noNul()
   note?: string;
 }
 
 export class ListApprovalEventsQuery {
-  @IsOptional() @IsUUID()
+  @IsOptional()
+  @IsUUID()
   conversationId?: string;
 
-  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(200)
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(200)
   limit?: number;
 
   /** Event id to page from: returns events older than it. */
-  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(Number.MAX_SAFE_INTEGER)
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(Number.MAX_SAFE_INTEGER)
   before?: number;
 }
 
@@ -56,7 +94,9 @@ const passwordField = () => (target: object, key: string) => {
 };
 
 export class LoginDto {
-  @trim() @IsEmail() @MaxLength(254)
+  @trim()
+  @IsEmail()
+  @MaxLength(254)
   email!: string;
 
   @passwordField()
@@ -72,10 +112,15 @@ export class ChangePasswordDto {
 }
 
 export class CreateReviewerDto {
-  @trim() @IsEmail() @MaxLength(254)
+  @trim()
+  @IsEmail()
+  @MaxLength(254)
   email!: string;
 
-  @trim() @IsString() @Length(1, 100) @noNul()
+  @trim()
+  @IsString()
+  @Length(1, 100)
+  @noNul()
   name!: string;
 
   @IsIn(['admin', 'reviewer'])
@@ -86,21 +131,30 @@ export class CreateReviewerDto {
 }
 
 export class UpdateReviewerDto {
-  @IsOptional() @trim() @IsString() @Length(1, 100) @noNul()
+  @IsOptional()
+  @trim()
+  @IsString()
+  @Length(1, 100)
+  @noNul()
   name?: string;
 
-  @IsOptional() @IsIn(['admin', 'reviewer'])
+  @IsOptional()
+  @IsIn(['admin', 'reviewer'])
   role?: 'admin' | 'reviewer';
 
-  @IsOptional() @IsBoolean()
+  @IsOptional()
+  @IsBoolean()
   active?: boolean;
 
-  @IsOptional() @passwordField()
+  @IsOptional()
+  @passwordField()
   password?: string;
 }
 
 export class RequestLinkDto {
-  @trim() @IsEmail() @MaxLength(254)
+  @trim()
+  @IsEmail()
+  @MaxLength(254)
   email!: string;
 }
 

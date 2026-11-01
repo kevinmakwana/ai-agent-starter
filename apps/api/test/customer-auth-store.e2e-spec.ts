@@ -53,7 +53,10 @@ maybe('customer auth store (e2e, real Postgres)', () => {
     });
 
     it('keep only the newest unused ones, per customer', async () => {
-      for (const h of ['a1', 'a2', 'a3']) { await store.createLoginLink(1, h, 15, LIMITS); await pool.query('SELECT pg_sleep(0.01)'); }
+      for (const h of ['a1', 'a2', 'a3']) {
+        await store.createLoginLink(1, h, 15, LIMITS);
+        await pool.query('SELECT pg_sleep(0.01)');
+      }
       await store.createLoginLink(2, 'b1', 15, LIMITS);
       expect(await store.consumeLoginLink('a1')).toBeNull();
       expect(await store.consumeLoginLink('a2')).not.toBeNull();
@@ -71,7 +74,10 @@ maybe('customer auth store (e2e, real Postgres)', () => {
         await new Promise((r) => setTimeout(r, 200));
         // while it waits, two later requests get their rows in
         for (const h of ['y', 'z']) {
-          await holder.query(`INSERT INTO login_links (customer_id, token_hash, created_at, expires_at) VALUES (1, $1, clock_timestamp(), clock_timestamp() + interval '15 minutes')`, [h]);
+          await holder.query(
+            `INSERT INTO login_links (customer_id, token_hash, created_at, expires_at) VALUES (1, $1, clock_timestamp(), clock_timestamp() + interval '15 minutes')`,
+            [h],
+          );
         }
         await holder.query('COMMIT');
         expect(await x).toBe(true);
@@ -115,7 +121,9 @@ maybe('customer auth store (e2e, real Postgres)', () => {
       await store.createSession(1, 's2', 7);
       await pool.query(`UPDATE customer_sessions SET last_seen_at = now() - interval '23 hours'`);
       expect(await store.resolveSession('s2')).not.toBeNull();
-      expect((await pool.query(`SELECT last_seen_at > now() - interval '5 seconds' AS fresh FROM customer_sessions`)).rows[0].fresh).toBe(true);
+      expect((await pool.query(`SELECT last_seen_at > now() - interval '5 seconds' AS fresh FROM customer_sessions`)).rows[0].fresh).toBe(
+        true,
+      );
       await pool.query(`UPDATE customer_sessions SET last_seen_at = now() - interval '25 hours'`);
       expect(await store.resolveSession('s2')).toBeNull();
 

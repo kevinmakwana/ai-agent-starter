@@ -1,10 +1,27 @@
-import type { Approval, ApprovalEvent, ConversationDetail, ConversationSummary, Customer, CustomerMe, MyConversation, Reviewer } from './types';
+import type {
+  Approval,
+  ApprovalEvent,
+  ConversationDetail,
+  ConversationSummary,
+  Customer,
+  CustomerMe,
+  MyConversation,
+  Reviewer,
+} from './types';
 
 /** `token` = conversation access token (customers); `key` = reviewer API key (console). */
-export interface Auth { token?: string; key?: string }
+export interface Auth {
+  token?: string;
+  key?: string;
+}
 
 export class ApiError extends Error {
-  constructor(message: string, readonly status: number) { super(message); }
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
 }
 
 export function authHeaders(auth: Auth): Record<string, string> {
@@ -33,7 +50,8 @@ const post = (body: unknown): RequestInit => ({ method: 'POST', body: JSON.strin
 const patch = (body: unknown): RequestInit => ({ method: 'PATCH', body: JSON.stringify(body) });
 
 export const api = {
-  health: () => call<{ status: string; provider: string; reviewerAuth: boolean; reviewerAccounts: boolean; customerLogin?: boolean }>('/health'),
+  health: () =>
+    call<{ status: string; provider: string; reviewerAuth: boolean; reviewerAccounts: boolean; customerLogin?: boolean }>('/health'),
   // customer
   startConversation: (who: { customerId: number } | { email: string }) =>
     call<ConversationSummary & { accessToken: string }>('/conversations', post(who)),
@@ -60,7 +78,8 @@ export const api = {
   me: () => call<{ reviewer: Reviewer }>('/auth/me'),
   changePassword: (current: string, next: string) => call<null>('/auth/password', post({ current, next })),
   reviewers: () => call<Reviewer[]>('/reviewers'),
-  createReviewer: (r: { email: string; name: string; role: 'admin' | 'reviewer'; password: string }) => call<Reviewer>('/reviewers', post(r)),
+  createReviewer: (r: { email: string; name: string; role: 'admin' | 'reviewer'; password: string }) =>
+    call<Reviewer>('/reviewers', post(r)),
   updateReviewer: (id: string, patchBody: { name?: string; role?: 'admin' | 'reviewer'; active?: boolean; password?: string }) =>
     call<Reviewer>(`/reviewers/${id}`, patch(patchBody)),
 };

@@ -3,8 +3,7 @@ import type { ApprovalNote, ClaimedAction } from './types';
 const TOOL = /^[a-z][a-z0-9_]{0,63}$/;
 const RULE = /^[a-z_]{1,40}$/;
 
-const positiveInt = (v: unknown): number | undefined =>
-  typeof v === 'number' && Number.isSafeInteger(v) && v > 0 ? v : undefined;
+const positiveInt = (v: unknown): number | undefined => (typeof v === 'number' && Number.isSafeInteger(v) && v > 0 ? v : undefined);
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 

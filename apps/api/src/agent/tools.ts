@@ -156,8 +156,7 @@ export const TOOLS: ToolDef[] = [
 
 export const toolByName = (name: string) => TOOLS.find((t) => t.name === name);
 
-export const toolSpecs = (): ToolSpec[] =>
-  TOOLS.map(({ name, description, inputSchema }) => ({ name, description, inputSchema }));
+export const toolSpecs = (): ToolSpec[] => TOOLS.map(({ name, description, inputSchema }) => ({ name, description, inputSchema }));
 
 const ajv = new Ajv({ allErrors: true, strict: true });
 const validators = new Map(TOOLS.map((t) => [t.name, ajv.compile(t.inputSchema)]));

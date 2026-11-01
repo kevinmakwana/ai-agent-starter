@@ -6,7 +6,8 @@ const AMOUNT = /\$\s*(\d+(?:\.\d{1,2})?)|(\d+(?:\.\d{1,2})?)\s*(?:usd|dollars)/i
 const WANTS_REFUND = /\b(refund|money back|reimburse)/i;
 // "cancelled"/"canceled" is usually a question about an order, not a request to cancel one.
 const WANTS_CANCEL = /\bcancel(?!l?ed\b)/i;
-const WANTS_TRACK = /\b(track|tracking|shipment|where(?:'s| is)(?: my)?(?: order| package| parcel)|has (?:it|my order) shipped|delivery status)/i;
+const WANTS_TRACK =
+  /\b(track|tracking|shipment|where(?:'s| is)(?: my)?(?: order| package| parcel)|has (?:it|my order) shipped|delivery status)/i;
 const WANTS_TICKET = /\b(ticket|complain|escalat)|speak (?:to|with) (?:a )?(?:human|person|manager)/i;
 const WANTS_ORDERS = /\b(my orders|order history|recent orders|list (?:my )?orders|what did i (?:order|buy))/i;
 
@@ -41,9 +42,7 @@ function plan(messages: ChatMessage[]): Completion {
   // tool calls already made in this turn, paired with their parsed results
   const results = new Map<string, any>();
   for (const m of turn) if (m.role === 'tool') results.set(m.toolCallId!, safeParse(m.content));
-  const done = turn
-    .flatMap((m) => m.toolCalls ?? [])
-    .map((c) => ({ call: c, result: results.get(c.id) }));
+  const done = turn.flatMap((m) => m.toolCalls ?? []).map((c) => ({ call: c, result: results.get(c.id) }));
   const last = done[done.length - 1];
   const has = (name: string) => done.some((d) => d.call.name === name);
   const call = (name: string, args: Record<string, unknown>, thought: string): Completion => ({
@@ -75,7 +74,8 @@ function plan(messages: ChatMessage[]): Completion {
       );
     }
     const r = last!.result;
-    if (r.status === 'refunded') return say(`Good news: your refund of ${money(r.amount)} for order #${r.orderId} was approved and issued.`);
+    if (r.status === 'refunded')
+      return say(`Good news: your refund of ${money(r.amount)} for order #${r.orderId} was approved and issued.`);
     return say(`A reviewer declined the refund request for order #${orderId}. ${r.message ?? ''}`.trim());
   }
 
@@ -100,8 +100,11 @@ function plan(messages: ChatMessage[]): Completion {
 
   if (WANTS_TICKET.test(text)) {
     if (!has('create_ticket')) {
-      return call('create_ticket', { subject: text.slice(0, 80).trim() || 'Support request', body: text },
-        "I'll open a support ticket so the team can follow up.");
+      return call(
+        'create_ticket',
+        { subject: text.slice(0, 80).trim() || 'Support request', body: text },
+        "I'll open a support ticket so the team can follow up.",
+      );
     }
     return say(`I've opened ticket #${last!.result.ticket.id}. Our team will get back to you by email.`);
   }
@@ -128,7 +131,8 @@ function plan(messages: ChatMessage[]): Completion {
     const latest = r.events?.at(-1);
     return say(
       `Order #${orderId} shipped with ${r.carrier} (tracking ${r.trackingNumber}): ${r.status}` +
-        (r.eta ? `, ETA ${String(r.eta).slice(0, 10)}` : '') + '.' +
+        (r.eta ? `, ETA ${String(r.eta).slice(0, 10)}` : '') +
+        '.' +
         (latest ? ` Latest: ${latest.description} (${latest.location}).` : ''),
     );
   }
@@ -159,5 +163,9 @@ function describeOrders(result: any): string {
 }
 
 function safeParse(s: string): any {
-  try { return JSON.parse(s); } catch { return {}; }
+  try {
+    return JSON.parse(s);
+  } catch {
+    return {};
+  }
 }

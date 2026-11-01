@@ -16,11 +16,28 @@ function setup(env: NodeJS.ProcessEnv = {}, mailerOverride?: LoginMailer | null)
   let t = T0;
   store.now = () => t;
   const sent: { to: string; link: string; ttl: number }[] = [];
-  const mailer: LoginMailer = { sendLink: async (to, link, ttl) => { sent.push({ to, link, ttl }); }, close: jest.fn() };
+  const mailer: LoginMailer = {
+    sendLink: async (to, link, ttl) => {
+      sent.push({ to, link, ttl });
+    },
+    close: jest.fn(),
+  };
   const service = new CustomerAuthService(store, loadConfig({ ...MAIL, ...env }), mailerOverride === undefined ? mailer : mailerOverride);
-  const request = async (email: string) => { await service.requestLink(email); await service.drain(); };
+  const request = async (email: string) => {
+    await service.requestLink(email);
+    await service.drain();
+  };
   const tokenOf = (link: string) => link.split('#token=')[1];
-  return { store, service, sent, request, tokenOf, advance: (ms: number) => { t += ms; } };
+  return {
+    store,
+    service,
+    sent,
+    request,
+    tokenOf,
+    advance: (ms: number) => {
+      t += ms;
+    },
+  };
 }
 const cookie = (token: string) => ({ headers: { cookie: `${CUSTOMER_COOKIE}=${token}` } });
 
@@ -51,10 +68,15 @@ describe('requestLink', () => {
 
   it('answers before the mail is sent, so a slow mail server cannot tell a known email from an unknown one', async () => {
     let release!: () => void;
-    const gate = new Promise<void>((r) => { release = r; });
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
     const slow: LoginMailer = { sendLink: () => gate, close: jest.fn() };
     const { service } = setup({}, slow);
-    const answered = await Promise.race([service.requestLink(AVA.email).then(() => 'answered'), new Promise((r) => setTimeout(() => r('waited'), 200))]);
+    const answered = await Promise.race([
+      service.requestLink(AVA.email).then(() => 'answered'),
+      new Promise((r) => setTimeout(() => r('waited'), 200)),
+    ]);
     expect(answered).toBe('answered');
     release();
     await service.drain();
@@ -62,7 +84,12 @@ describe('requestLink', () => {
 
   it('never lets a mail or store failure escape, and logs neither the address nor the link', async () => {
     const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
-    const failing: LoginMailer = { sendLink: async () => { throw Object.assign(new Error(`550 no such user ${AVA.email}`), { code: 'EENVELOPE' }); }, close: jest.fn() };
+    const failing: LoginMailer = {
+      sendLink: async () => {
+        throw Object.assign(new Error(`550 no such user ${AVA.email}`), { code: 'EENVELOPE' });
+      },
+      close: jest.fn(),
+    };
     const { service } = setup({}, failing);
     await expect(service.requestLink(AVA.email)).resolves.toBeUndefined();
     await expect(service.drain()).resolves.toBeUndefined();
@@ -127,7 +154,10 @@ describe('verify', () => {
 
   it('keeps only the 2 newest unused links of a customer', async () => {
     const { request, sent, tokenOf, service, advance } = setup();
-    for (let i = 0; i < 3; i++) { await request(AVA.email); advance(1000); }
+    for (let i = 0; i < 3; i++) {
+      await request(AVA.email);
+      advance(1000);
+    }
     await expect(service.verify(tokenOf(sent[0].link))).rejects.toThrow('Invalid or expired link');
     await expect(service.verify(tokenOf(sent[1].link))).resolves.toMatchObject({ customer: AVA });
     await expect(service.verify(tokenOf(sent[2].link))).resolves.toMatchObject({ customer: AVA });

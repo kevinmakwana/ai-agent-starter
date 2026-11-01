@@ -5,9 +5,23 @@ import type { Approval, Reviewer } from './types';
 
 const me: Reviewer = { id: 'r1', email: 'a@example.com', name: 'Alice', role: 'reviewer', active: true, createdAt: '', lastLoginAt: null };
 const approval = (over: Partial<Approval> = {}): Approval => ({
-  id: 'a1', runId: 'run', conversationId: 'c', toolName: 'issue_refund', toolArgs: { orderId: 1, amount: 50 }, toolCallId: 't', reasoning: '',
-  status: 'pending_approval', decisionNote: null, createdAt: '', decidedAt: null, customerName: 'n', customerEmail: 'e', userMessage: null,
-  orderTotal: 50, orderRefunded: 0, ...over,
+  id: 'a1',
+  runId: 'run',
+  conversationId: 'c',
+  toolName: 'issue_refund',
+  toolArgs: { orderId: 1, amount: 50 },
+  toolCallId: 't',
+  reasoning: '',
+  status: 'pending_approval',
+  decisionNote: null,
+  createdAt: '',
+  decidedAt: null,
+  customerName: 'n',
+  customerEmail: 'e',
+  userMessage: null,
+  orderTotal: 50,
+  orderRefunded: 0,
+  ...over,
 });
 
 describe('needsLogin', () => {
@@ -31,7 +45,10 @@ describe('approvalProgress', () => {
   it('shows how many of the required approvals are in, with who gave them', () => {
     assert.equal(approvalProgress(approval({ approvalsRequired: 2, approvalsGiven: 0, approvedBy: [] })), '0 of 2 approvals');
     assert.equal(approvalProgress(approval({ approvalsRequired: 2, approvalsGiven: 1, approvedBy: ['Bob'] })), '1 of 2 approvals · Bob');
-    assert.equal(approvalProgress(approval({ approvalsRequired: 2, approvalsGiven: 2, approvedBy: ['Bob', 'Cy'], status: 'approved' })), '2 of 2 approvals · Bob, Cy');
+    assert.equal(
+      approvalProgress(approval({ approvalsRequired: 2, approvalsGiven: 2, approvedBy: ['Bob', 'Cy'], status: 'approved' })),
+      '2 of 2 approvals · Bob, Cy',
+    );
   });
 
   it('tolerates missing counters on a two-approval action', () => {
@@ -40,7 +57,8 @@ describe('approvalProgress', () => {
 });
 
 describe('canApprove', () => {
-  const two = (over: Partial<Approval> = {}) => approval({ approvalsRequired: 2, approvalsGiven: 0, approvedBy: [], approvedByIds: [], ...over });
+  const two = (over: Partial<Approval> = {}) =>
+    approval({ approvalsRequired: 2, approvalsGiven: 0, approvedBy: [], approvedByIds: [], ...over });
 
   it('allows a one-approval action for anyone, signed in or not', () => {
     assert.deepEqual(canApprove(approval(), me), { allowed: true, reason: null });

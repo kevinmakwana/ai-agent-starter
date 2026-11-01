@@ -27,11 +27,15 @@ export interface NotifierOptions {
 }
 
 const defaultSleep = (ms: number) =>
-  new Promise<void>((resolve) => { setTimeout(resolve, ms).unref(); });
+  new Promise<void>((resolve) => {
+    setTimeout(resolve, ms).unref();
+  });
 
 /** Logged text never carries a URL (webhook URLs hold secrets) and is short. */
 const safe = (err: unknown): string =>
-  String(err instanceof Error ? err.message : err).replace(/https?:\/\/\S+/g, '[url]').slice(0, 120);
+  String(err instanceof Error ? err.message : err)
+    .replace(/https?:\/\/\S+/g, '[url]')
+    .slice(0, 120);
 
 /**
  * Announces new pending approvals. Each pass claims a batch (the claim commits first, so delivery is at most once)
@@ -72,7 +76,9 @@ export class Notifier {
     this.batch = opts.batch ?? 5;
     this.sweepMs = opts.sweepMs ?? 60_000;
     this.debounceMs = opts.debounceMs ?? 200;
-    this.stopSignal = new Promise<void>((resolve) => { this.signalStop = resolve; });
+    this.stopSignal = new Promise<void>((resolve) => {
+      this.signalStop = resolve;
+    });
   }
 
   /** Claims up to `batch` actions and delivers them. Resolves with how many were claimed; never rejects. */
@@ -87,7 +93,10 @@ export class Notifier {
     }
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
-      if (this.stopped) { await this.release(rows.slice(i)); break; }
+      if (this.stopped) {
+        await this.release(rows.slice(i));
+        break;
+      }
       const note = buildNote(row, this.consoleUrl);
       await Promise.allSettled(this.channels.map((channel) => this.deliver(channel, note)));
     }
@@ -106,12 +115,20 @@ export class Notifier {
   /** Asks for a pass. Calls during a pass coalesce into one follow-up pass. */
   request(): void {
     if (this.stopped) return;
-    if (this.running) { this.again = true; return; }
+    if (this.running) {
+      this.again = true;
+      return;
+    }
     this.running = this.drain()
-      .catch((e) => { this.log.warn(`Notification pass failed: ${safe(e)}`); })
+      .catch((e) => {
+        this.log.warn(`Notification pass failed: ${safe(e)}`);
+      })
       .finally(() => {
         this.running = undefined;
-        if (this.again) { this.again = false; this.request(); }
+        if (this.again) {
+          this.again = false;
+          this.request();
+        }
       });
   }
 
@@ -135,18 +152,27 @@ export class Notifier {
     clearTimeout(this.debounceTimer);
     this.debounceTimer = undefined;
     await this.running;
-    await Promise.allSettled(this.channels.map(async (channel) => { await channel.close?.(); }));
+    await Promise.allSettled(
+      this.channels.map(async (channel) => {
+        await channel.close?.();
+      }),
+    );
   }
 
   /** A burst of events becomes one pass, `debounceMs` after the first. */
   private schedule(): void {
     if (this.stopped || this.debounceTimer) return;
-    this.debounceTimer = setTimeout(() => { this.debounceTimer = undefined; this.request(); }, this.debounceMs);
+    this.debounceTimer = setTimeout(() => {
+      this.debounceTimer = undefined;
+      this.request();
+    }, this.debounceMs);
     this.debounceTimer.unref();
   }
 
   private async drain(): Promise<void> {
-    while ((await this.runOnce()) === this.batch) { /* a full batch: there may be more */ }
+    while ((await this.runOnce()) === this.batch) {
+      /* a full batch: there may be more */
+    }
   }
 
   private async deliver(channel: Channel, note: ApprovalNote): Promise<void> {

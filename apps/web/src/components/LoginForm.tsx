@@ -11,7 +11,8 @@ export function LoginForm({ notice, onSignedIn }: { notice: string | null; onSig
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setBusy(true); setError(null);
+    setBusy(true);
+    setError(null);
     try {
       const { reviewer } = await api.login(email.trim(), password);
       setPassword('');
@@ -27,11 +28,36 @@ export function LoginForm({ notice, onSignedIn }: { notice: string | null; onSig
   return (
     <form className="panel login-card" onSubmit={submit}>
       <h1>Reviewer sign-in</h1>
-      <p className="muted">Sign in with your reviewer account. Your session ends when you log out, after 30 idle minutes, or after its lifetime.</p>
-      <input type="email" aria-label="Email" placeholder="Email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} autoFocus required />
-      <input type="password" aria-label="Password" placeholder="Password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
-      {(error ?? notice) && <div className="notice err" role="alert">{error ?? notice}</div>}
-      <button className="btn primary" disabled={busy || !email.trim() || !password}>{busy ? 'Signing in…' : 'Sign in'}</button>
+      <p className="muted">
+        Sign in with your reviewer account. Your session ends when you log out, after 30 idle minutes, or after its lifetime.
+      </p>
+      <input
+        type="email"
+        aria-label="Email"
+        placeholder="Email"
+        autoComplete="username"
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+        autoFocus
+        required
+      />
+      <input
+        type="password"
+        aria-label="Password"
+        placeholder="Password"
+        autoComplete="current-password"
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+        required
+      />
+      {(error ?? notice) && (
+        <div className="notice err" role="alert">
+          {error ?? notice}
+        </div>
+      )}
+      <button className="btn primary" disabled={busy || !email.trim() || !password}>
+        {busy ? 'Signing in…' : 'Sign in'}
+      </button>
     </form>
   );
 }

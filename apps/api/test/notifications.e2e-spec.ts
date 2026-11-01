@@ -27,9 +27,13 @@ async function until(check: () => boolean | Promise<boolean>, ms = 3000): Promis
   }
 }
 
-interface Hit { headers: http.IncomingHttpHeaders; body: string }
+interface Hit {
+  headers: http.IncomingHttpHeaders;
+  body: string;
+}
 
-const AGENT_LISTENERS = "SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND application_name = 'agent-events-listener'";
+const AGENT_LISTENERS =
+  "SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND application_name = 'agent-events-listener'";
 
 maybe('reviewer notifications (e2e, real Postgres)', () => {
   const apps: INestApplication[] = [];
@@ -38,25 +42,38 @@ maybe('reviewer notifications (e2e, real Postgres)', () => {
   /** Independent of any app under test, so it can reset and inspect the database while apps are booting or closed. */
   let admin: Pool;
 
-  beforeAll(() => { admin = new Pool({ connectionString: process.env.E2E_DATABASE_URL, max: 2 }); });
+  beforeAll(() => {
+    admin = new Pool({ connectionString: process.env.E2E_DATABASE_URL, max: 2 });
+  });
   afterAll(() => admin.end());
 
   /** A local receiver on a free port that records every request and answers with `receiver.status`. */
   const startReceiver = async () => {
     const hits: Hit[] = [];
     const receiver = {
-      hits, status: 200, url: '',
+      hits,
+      status: 200,
+      url: '',
       /** When set, the next request is recorded but left unanswered until `answerHeld()`. */
       holdNext: false,
       held: [] as http.ServerResponse[],
-      answerHeld() { for (const res of this.held.splice(0)) { res.statusCode = this.status; res.end('{}'); } },
+      answerHeld() {
+        for (const res of this.held.splice(0)) {
+          res.statusCode = this.status;
+          res.end('{}');
+        }
+      },
     };
     const server = http.createServer((req, res) => {
       const chunks: Buffer[] = [];
       req.on('data', (c: Buffer) => chunks.push(c));
       req.on('end', () => {
         hits.push({ headers: req.headers, body: Buffer.concat(chunks).toString('utf8') });
-        if (receiver.holdNext) { receiver.holdNext = false; receiver.held.push(res); return; }
+        if (receiver.holdNext) {
+          receiver.holdNext = false;
+          receiver.held.push(res);
+          return;
+        }
         res.statusCode = receiver.status;
         res.end('{}');
       });
@@ -90,8 +107,10 @@ maybe('reviewer notifications (e2e, real Postgres)', () => {
   const parkRefund = async (app: INestApplication) => {
     const created = await request(app.getHttpServer()).post('/conversations').send({ customerId: 1 }).expect(201);
     const conversationId = created.body.id as string;
-    await request(app.getHttpServer()).post(`/conversations/${conversationId}/messages`)
-      .send({ content: 'Order #1 arrived damaged, please refund it' }).expect(201);
+    await request(app.getHttpServer())
+      .post(`/conversations/${conversationId}/messages`)
+      .send({ content: 'Order #1 arrived damaged, please refund it' })
+      .expect(201);
     return conversationId;
   };
 
@@ -102,10 +121,15 @@ maybe('reviewer notifications (e2e, real Postgres)', () => {
   afterEach(async () => {
     try {
       await Promise.allSettled(apps.splice(0).map((app) => app.close()));
-      await Promise.allSettled(servers.splice(0).map((server) => new Promise<void>((resolve) => {
-        server.close(() => resolve());
-        server.closeAllConnections();
-      })));
+      await Promise.allSettled(
+        servers.splice(0).map(
+          (server) =>
+            new Promise<void>((resolve) => {
+              server.close(() => resolve());
+              server.closeAllConnections();
+            }),
+        ),
+      );
       // leave no pending rows behind for whatever runs next
       await Promise.allSettled([admin.query('DELETE FROM conversations')]);
     } finally {
@@ -127,8 +151,13 @@ maybe('reviewer notifications (e2e, real Postgres)', () => {
       const conv = await store.createConversation(1, 't');
       const run = await store.createRun(conv.id);
       return store.createAction({
-        runId: run.id, conversationId: conv.id, toolName: 'issue_refund', toolArgs: { orderId, amount: 18.75, reason: 'damaged' },
-        toolCallId: 'call_1', reasoning: 'r', policy: { rule: 'over_threshold', detail: { threshold: 10, priorRefunded: 0, amount: 18.75 } },
+        runId: run.id,
+        conversationId: conv.id,
+        toolName: 'issue_refund',
+        toolArgs: { orderId, amount: 18.75, reason: 'damaged' },
+        toolCallId: 'call_1',
+        reasoning: 'r',
+        policy: { rule: 'over_threshold', detail: { threshold: 10, priorRefunded: 0, amount: 18.75 } },
       });
     };
     const notifiedAt = async (id: string) =>
@@ -140,8 +169,11 @@ maybe('reviewer notifications (e2e, real Postgres)', () => {
 
       const [one] = await store.claimUnnotified(1);
       expect(one).toEqual({
-        id: first.id, toolName: 'issue_refund', toolArgs: { orderId: 1, amount: 18.75, reason: 'damaged' },
-        createdAt: first.createdAt, rule: 'over_threshold',
+        id: first.id,
+        toolName: 'issue_refund',
+        toolArgs: { orderId: 1, amount: 18.75, reason: 'damaged' },
+        createdAt: first.createdAt,
+        rule: 'over_threshold',
       });
       expect((await store.claimUnnotified(1)).map((r) => r.id)).toEqual([second.id]);
       expect(await store.claimUnnotified(1)).toEqual([]);
@@ -216,7 +248,11 @@ maybe('reviewer notifications (e2e, real Postgres)', () => {
       const keys = Object.keys(payload.approval);
       expect(['id', 'tool', 'orderId', 'amount', 'rule', 'createdAt', 'consoleUrl']).toEqual(expect.arrayContaining(keys));
       expect(keys).toEqual(expect.arrayContaining(['id', 'tool', 'orderId', 'rule']));
-      expect(payload.approval).toMatchObject({ tool: 'issue_refund', orderId: 1, consoleUrl: expect.stringContaining('http://localhost:3000/reviewer') });
+      expect(payload.approval).toMatchObject({
+        tool: 'issue_refund',
+        orderId: 1,
+        consoleUrl: expect.stringContaining('http://localhost:3000/reviewer'),
+      });
       const stored = (await admin.query('SELECT tool_args FROM actions WHERE id = $1', [payload.approval.id])).rows[0].tool_args;
       expect(stored.reason).toContain('damaged'); // so the absence check below is not vacuous
       for (const leaked of ['Ava', 'ava.brooks@example.com', 'damaged', conversationId]) expect(hit.body).not.toContain(leaked);
@@ -282,8 +318,13 @@ maybe('reviewer notifications (e2e, real Postgres)', () => {
         const conv = await store.createConversation(1, 't');
         const run = await store.createRun(conv.id);
         return store.createAction({
-          runId: run.id, conversationId: conv.id, toolName: 'issue_refund', toolArgs: { orderId, amount: 18.75 },
-          toolCallId: 'call_1', reasoning: 'r', policy: { rule: 'over_threshold', detail: {} },
+          runId: run.id,
+          conversationId: conv.id,
+          toolName: 'issue_refund',
+          toolArgs: { orderId, amount: 18.75 },
+          toolCallId: 'call_1',
+          reasoning: 'r',
+          policy: { rule: 'over_threshold', detail: {} },
         });
       };
       const [a, b] = await Promise.all([park(1), park(2)]);

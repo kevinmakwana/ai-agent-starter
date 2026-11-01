@@ -2,8 +2,16 @@ import { parseReviewerAddArgs, resolvePassword } from './reviewer-add-args';
 
 describe('parseReviewerAddArgs', () => {
   it('reads email and name, defaulting the role to admin and lower-casing the email', () => {
-    expect(parseReviewerAddArgs(['--email', 'You@Example.com', '--name', 'You Person'])).toEqual({ email: 'you@example.com', name: 'You Person', role: 'admin' });
-    expect(parseReviewerAddArgs(['--email=a@b.co', '--name=A', '--role=reviewer'])).toEqual({ email: 'a@b.co', name: 'A', role: 'reviewer' });
+    expect(parseReviewerAddArgs(['--email', 'You@Example.com', '--name', 'You Person'])).toEqual({
+      email: 'you@example.com',
+      name: 'You Person',
+      role: 'admin',
+    });
+    expect(parseReviewerAddArgs(['--email=a@b.co', '--name=A', '--role=reviewer'])).toEqual({
+      email: 'a@b.co',
+      name: 'A',
+      role: 'reviewer',
+    });
   });
 
   it('refuses a password on the command line in any spelling (it would land in shell history)', () => {

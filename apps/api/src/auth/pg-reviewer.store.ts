@@ -2,8 +2,15 @@ import { type Pool } from 'pg';
 import { ConflictError } from '../agent/errors';
 import { camel } from '../db/pool';
 import {
-  IDLE_TIMEOUT_MINUTES, LOCKOUT_AFTER_FAILURES, LOCKOUT_MINUTES,
-  type NewReviewer, type Reviewer, type ReviewerCredentials, type ReviewerPatch, type ReviewerStore, type SessionReviewer,
+  IDLE_TIMEOUT_MINUTES,
+  LOCKOUT_AFTER_FAILURES,
+  LOCKOUT_MINUTES,
+  type NewReviewer,
+  type Reviewer,
+  type ReviewerCredentials,
+  type ReviewerPatch,
+  type ReviewerStore,
+  type SessionReviewer,
 } from './reviewer.store';
 
 /** How long the "do any reviewers exist" answer is reused; creating a reviewer through this store resets it at once. */
@@ -14,7 +21,11 @@ const VIEW = `id, email, name, role, active, created_at, last_login_at`;
 const toReviewer = (row: Record<string, unknown>): Reviewer => {
   const r = camel(row) as Record<string, unknown>;
   return {
-    id: r.id as string, email: r.email as string, name: r.name as string, role: r.role as Reviewer['role'], active: r.active as boolean,
+    id: r.id as string,
+    email: r.email as string,
+    name: r.name as string,
+    role: r.role as Reviewer['role'],
+    active: r.active as boolean,
     createdAt: new Date(r.createdAt as string).toISOString(),
     lastLoginAt: r.lastLoginAt ? new Date(r.lastLoginAt as string).toISOString() : null,
   };
@@ -41,7 +52,10 @@ export class PgReviewerStore implements ReviewerStore {
   }
 
   async findByEmail(email: string): Promise<ReviewerCredentials | null> {
-    const { rows } = await this.pool.query(`SELECT ${VIEW}, password_hash, (locked_until IS NOT NULL AND locked_until > now()) AS locked FROM reviewers WHERE email = lower($1)`, [email]);
+    const { rows } = await this.pool.query(
+      `SELECT ${VIEW}, password_hash, (locked_until IS NOT NULL AND locked_until > now()) AS locked FROM reviewers WHERE email = lower($1)`,
+      [email],
+    );
     if (!rows[0]) return null;
     return { ...toReviewer(rows[0]), passwordHash: rows[0].password_hash, locked: rows[0].locked };
   }
@@ -70,7 +84,9 @@ export class PgReviewerStore implements ReviewerStore {
         return null;
       }
       if (losesAdmin && before[0].role === 'admin' && before[0].active) {
-        const { rows: n } = await client.query(`SELECT count(*)::int AS n FROM reviewers WHERE role = 'admin' AND active AND id <> $1`, [id]);
+        const { rows: n } = await client.query(`SELECT count(*)::int AS n FROM reviewers WHERE role = 'admin' AND active AND id <> $1`, [
+          id,
+        ]);
         if (n[0].n === 0) throw new ConflictError('The last active administrator cannot be deactivated or demoted', 'LAST_ADMIN');
       }
       const { rows } = await client.query(
@@ -81,7 +97,10 @@ export class PgReviewerStore implements ReviewerStore {
       );
       const demoted = patch.role === 'reviewer' && before[0].role === 'admin';
       if (patch.active === false || patch.passwordHash !== undefined || demoted) {
-        await client.query('DELETE FROM reviewer_sessions WHERE reviewer_id = $1 AND token_hash IS DISTINCT FROM $2', [id, opts.keepSession ?? null]);
+        await client.query('DELETE FROM reviewer_sessions WHERE reviewer_id = $1 AND token_hash IS DISTINCT FROM $2', [
+          id,
+          opts.keepSession ?? null,
+        ]);
       }
       await client.query('COMMIT');
       return toReviewer(rows[0]);
@@ -140,7 +159,10 @@ export class PgReviewerStore implements ReviewerStore {
     );
     if (!rows[0]) return null;
     // at most one write a minute per session
-    await this.pool.query(`UPDATE reviewer_sessions SET last_seen_at = now() WHERE token_hash = $1 AND last_seen_at < now() - interval '1 minute'`, [tokenHash]);
+    await this.pool.query(
+      `UPDATE reviewer_sessions SET last_seen_at = now() WHERE token_hash = $1 AND last_seen_at < now() - interval '1 minute'`,
+      [tokenHash],
+    );
     return rows[0];
   }
 
@@ -149,13 +171,15 @@ export class PgReviewerStore implements ReviewerStore {
   }
 
   async deleteSessionsForReviewer(reviewerId: string, keepSession?: string): Promise<void> {
-    await this.pool.query('DELETE FROM reviewer_sessions WHERE reviewer_id = $1 AND token_hash IS DISTINCT FROM $2', [reviewerId, keepSession ?? null]);
+    await this.pool.query('DELETE FROM reviewer_sessions WHERE reviewer_id = $1 AND token_hash IS DISTINCT FROM $2', [
+      reviewerId,
+      keepSession ?? null,
+    ]);
   }
 
   async deleteExpired(): Promise<void> {
-    await this.pool.query(
-      `DELETE FROM reviewer_sessions WHERE expires_at <= now() OR last_seen_at <= now() - make_interval(mins => $1)`,
-      [IDLE_TIMEOUT_MINUTES],
-    );
+    await this.pool.query(`DELETE FROM reviewer_sessions WHERE expires_at <= now() OR last_seen_at <= now() - make_interval(mins => $1)`, [
+      IDLE_TIMEOUT_MINUTES,
+    ]);
   }
 }

@@ -32,7 +32,7 @@ maybe('reviewer store (e2e, real Postgres)', () => {
       expect(r).toMatchObject({ email: 'mixed@example.com', role: 'reviewer', active: true, lastLoginAt: null });
       expect(Object.keys(r).sort()).toEqual(['active', 'createdAt', 'email', 'id', 'lastLoginAt', 'name', 'role']);
       expect((await store.findByEmail('MIXED@example.com'))?.id).toBe(r.id);
-      expect((await store.findByEmail('MIXED@example.com'))).toMatchObject({ passwordHash: 'scrypt$x', locked: false });
+      expect(await store.findByEmail('MIXED@example.com')).toMatchObject({ passwordHash: 'scrypt$x', locked: false });
       expect(await store.findById(r.id)).toEqual(r);
       expect(await store.findByEmail('nobody@example.com')).toBeNull();
       expect(await store.listReviewers()).toEqual([r]);
@@ -44,7 +44,9 @@ maybe('reviewer store (e2e, real Postgres)', () => {
     });
 
     it('the database itself refuses a mixed-case email', async () => {
-      await expect(pool.query(`INSERT INTO reviewers (email, name, password_hash, role) VALUES ('X@Y.com', 'x', 'h', 'admin')`)).rejects.toThrow();
+      await expect(
+        pool.query(`INSERT INTO reviewers (email, name, password_hash, role) VALUES ('X@Y.com', 'x', 'h', 'admin')`),
+      ).rejects.toThrow();
     });
 
     it('hasAnyReviewer flips to true after createReviewer even inside the cache window', async () => {
@@ -80,7 +82,10 @@ maybe('reviewer store (e2e, real Postgres)', () => {
     it('two admins deactivating each other at the same instant: one wins, one admin is left', async () => {
       const a = await newReviewer('a@example.com', 'admin');
       const b = await newReviewer('b@example.com', 'admin');
-      const results = await Promise.allSettled([store.updateReviewer(a.id, { active: false }), store.updateReviewer(b.id, { active: false })]);
+      const results = await Promise.allSettled([
+        store.updateReviewer(a.id, { active: false }),
+        store.updateReviewer(b.id, { active: false }),
+      ]);
       expect(results.map((r) => r.status).sort()).toEqual(['fulfilled', 'rejected']);
       expect(await store.countActiveAdmins()).toBe(1);
     });
@@ -167,7 +172,7 @@ maybe('reviewer store (e2e, real Postgres)', () => {
       expect((await pool.query('SELECT token_hash FROM reviewer_sessions')).rows).toEqual([{ token_hash: 'b2' }]);
     });
 
-    it('a session whose reviewer was deactivated behind the store\'s back (plain SQL) still does not resolve', async () => {
+    it("a session whose reviewer was deactivated behind the store's back (plain SQL) still does not resolve", async () => {
       const r = await newReviewer();
       await store.createSession(r.id, 'hash-1', 12);
       await pool.query('UPDATE reviewers SET active = false');
@@ -204,15 +209,19 @@ maybe('reviewer store (e2e, real Postgres)', () => {
       await pool.query(`UPDATE reviewers SET locked_until = now() - interval '1 second'`);
       expect((await store.findByEmail(r.email))?.locked).toBe(false);
       await store.recordLoginFailure(r.id);
-      expect((await pool.query('SELECT failed_attempts, locked_until FROM reviewers')).rows[0]).toEqual({ failed_attempts: 1, locked_until: null });
+      expect((await pool.query('SELECT failed_attempts, locked_until FROM reviewers')).rows[0]).toEqual({
+        failed_attempts: 1,
+        locked_until: null,
+      });
     });
 
     it('a success clears the counter and the lock and stamps last_login_at', async () => {
       const r = await newReviewer();
       for (let i = 0; i < 5; i++) await store.recordLoginFailure(r.id);
       await store.recordLoginSuccess(r.id);
-      expect((await pool.query('SELECT failed_attempts, locked_until, last_login_at IS NOT NULL AS stamped FROM reviewers')).rows[0])
-        .toEqual({ failed_attempts: 0, locked_until: null, stamped: true });
+      expect(
+        (await pool.query('SELECT failed_attempts, locked_until, last_login_at IS NOT NULL AS stamped FROM reviewers')).rows[0],
+      ).toEqual({ failed_attempts: 0, locked_until: null, stamped: true });
     });
   });
 });

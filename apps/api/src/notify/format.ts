@@ -23,8 +23,7 @@ export function plainText(n: ApprovalNote): string {
 const escapeSlack = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 /** A `<`, `>` or `|` in the link target would end it early, so they are percent-encoded. */
-const slackLink = (s: string): string =>
-  s.replace(/&/g, '&amp;').replace(/</g, '%3C').replace(/>/g, '%3E').replace(/\|/g, '%7C');
+const slackLink = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '%3C').replace(/>/g, '%3E').replace(/\|/g, '%7C');
 
 /** One line for a Slack incoming webhook. */
 export function slackText(n: ApprovalNote): string {
