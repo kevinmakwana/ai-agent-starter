@@ -140,7 +140,7 @@ describe('mock provider: cancel and track flows', () => {
     const { runner, store, conv } = withProcessing();
     await runner.handleUserMessage(conv, `cancel order #10 ${'because '.repeat(100)}`);
     const [action] = [...store.actions.values()];
-    expect((action.toolArgs as any).reason).toHaveLength(300);
+    expect((action.toolArgs as { reason: string }).reason).toHaveLength(300);
   });
 
   it('tells the customer a reviewer declined, with the reviewer note when present', async () => {

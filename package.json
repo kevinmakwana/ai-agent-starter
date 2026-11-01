@@ -21,7 +21,7 @@
     "test": "npm test -w apps/api && npm test -w apps/web",
     "test:e2e": "npm run test:e2e -w apps/api",
     "screenshot": "node scripts/screenshot.mjs",
-    "lint": "eslint apps scripts eslint.config.mjs --max-warnings 44",
+    "lint": "eslint apps scripts eslint.config.mjs",
     "format": "prettier --write \"apps/**/*.{ts,tsx}\" \"*.mjs\" \"scripts/*.mjs\"",
     "format:check": "prettier --check \"apps/**/*.{ts,tsx}\" \"*.mjs\" \"scripts/*.mjs\""
   },

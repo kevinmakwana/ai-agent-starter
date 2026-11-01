@@ -12,7 +12,7 @@ const maybe = process.env.E2E_DATABASE_URL ? describe : describe.skip;
 
 interface SseEvent {
   event: string;
-  data: any;
+  data: Record<string, unknown>;
 }
 
 const waitFor = async (cond: () => boolean, ms = 3000) => {
@@ -193,7 +193,7 @@ maybe('SSE streams (e2e, real Postgres)', () => {
 
     const res = await send(c, REFUND);
     expect(res.status).toBe(201);
-    expect(((await res.json()) as any).run.status).toBe('awaiting_approval');
+    expect(((await res.json()) as { run: { status: string } }).run.status).toBe('awaiting_approval');
 
     await waitFor(() => has(watcher.events, 'approvals', c.id) && has(watcher.events, 'audit', c.id));
     await waitFor(() => has(customer.events, 'trace', c.id)); // the customer stream was live, just filtered
@@ -356,7 +356,7 @@ maybe('SSE streams (e2e, real Postgres)', () => {
 
     const res = await send(c, 'hello');
     expect(res.status).toBe(201);
-    const body = (await res.json()) as any;
+    const body = (await res.json()) as { run: { status: string; steps: unknown[] } };
     expect(body.run.status).toBe('completed');
     expect(body.run.steps.at(-1)).toMatchObject({ role: 'assistant' });
 

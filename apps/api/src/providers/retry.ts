@@ -61,7 +61,7 @@ export async function fetchWithRetry(
 }
 
 /** The body of a successful response as JSON; a non-JSON page or a body cut off mid-read is an upstream failure, not a crash. */
-export async function readJson(provider: string, res: Response): Promise<any> {
+export async function readJson(provider: string, res: Response): Promise<unknown> {
   try {
     return await res.json();
   } catch (e) {

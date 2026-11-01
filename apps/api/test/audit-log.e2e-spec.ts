@@ -198,7 +198,7 @@ maybe('approval audit log in the store (real Postgres)', () => {
       reasoning: 'r',
     });
     const views = await store.listApprovals({ conversationId: conv.id });
-    expect(views.find((v) => v.toolArgs && (v.toolArgs as any).orderId === 1)).toMatchObject({ orderStatus: 'delivered' });
+    expect(views.find((v) => v.toolArgs && (v.toolArgs as { orderId?: number }).orderId === 1)).toMatchObject({ orderStatus: 'delivered' });
     expect(views.find((v) => v.id === unknown.id)).toMatchObject({ orderStatus: null, orderTotal: null });
   });
 
@@ -254,7 +254,7 @@ maybe('approval audit log over HTTP (real Postgres)', () => {
       await http().post(`/approvals/${pending.id}`).set(reviewer).send({ decision: 'approve', note: 'ok' }).expect(201);
 
       const events = (await http().get('/approvals/events').set(reviewer).expect(200)).body;
-      expect(events.map((e: any) => [e.kind, e.actorType])).toEqual([
+      expect(events.map((e: { kind: string; actorType: string }) => [e.kind, e.actorType])).toEqual([
         ['approved', 'reviewer'],
         ['requested', 'policy'],
       ]);

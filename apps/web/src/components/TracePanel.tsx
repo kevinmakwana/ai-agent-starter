@@ -1,3 +1,4 @@
+import { isBlockedResult } from '@/lib/trace';
 import type { Approval, ConversationDetail, Run, Step } from '@/lib/types';
 
 const ms = (n: number | null) => (n == null ? null : n >= 1000 ? `${(n / 1000).toFixed(2)}s` : `${n}ms`);
@@ -58,7 +59,7 @@ function StepCard({ step, run, approval }: { step: Step; run: Run; approval?: Ap
       </div>
     );
   }
-  const failed = Boolean(step.result?.error) || step.result?.status === 'rejected';
+  const failed = isBlockedResult(step.result);
   return (
     <div className={`step result ${failed ? 'bad' : ''}`}>
       <div className="step-head">

@@ -1,6 +1,7 @@
 import { UpstreamLlmError } from '../agent/errors';
 import type { ChatMessage, ChatProvider, Completion, ToolSpec } from '../agent/types';
 import { errorDetail, fetchWithRetry, readJson, type RetryOptions } from './retry';
+import { count, isRecord, str } from './wire';
 
 export interface OpenAiOptions extends RetryOptions {
   apiKey: string;
@@ -44,26 +45,27 @@ export class OpenAiProvider implements ChatProvider {
     if (!res.ok) throw new UpstreamLlmError(this.name, `provider returned HTTP ${res.status}`, await errorDetail(res));
 
     const data = await readJson(this.name, res);
-    const msg = data?.choices?.[0]?.message;
-    if (!msg) throw new UpstreamLlmError(this.name, 'response contained no message');
+    const choice = isRecord(data) && Array.isArray(data.choices) && isRecord(data.choices[0]) ? data.choices[0] : undefined;
+    const msg = choice && isRecord(choice.message) ? choice.message : undefined;
+    if (!choice || !msg) throw new UpstreamLlmError(this.name, 'response contained no message');
     // A cut-off tool call has incomplete arguments: never hand it to the agent to execute.
-    const finish = data.choices[0].finish_reason;
+    const finish = choice.finish_reason;
     if (finish === 'length') {
       throw new UpstreamLlmError(this.name, 'the response was cut off at the token limit', 'finish_reason=length; raise LLM_MAX_TOKENS');
     }
     if (finish === 'content_filter') throw new UpstreamLlmError(this.name, 'the model declined to respond', 'finish_reason=content_filter');
+    const usage = isRecord(data) && isRecord(data.usage) ? data.usage : undefined;
     return {
-      text: msg.content ?? undefined,
-      toolCalls: (msg.tool_calls ?? []).map((c: any) => ({
-        id: c.id,
-        name: String(c.function?.name ?? ''),
-        args: parseArgs(c.function?.arguments),
-      })),
-      usage: data.usage
+      text: typeof msg.content === 'string' ? msg.content : undefined,
+      toolCalls: (Array.isArray(msg.tool_calls) ? msg.tool_calls : []).filter(isRecord).map((c) => {
+        const fn = isRecord(c.function) ? c.function : {};
+        return { id: str(c.id), name: str(fn.name), args: parseArgs(typeof fn.arguments === 'string' ? fn.arguments : undefined) };
+      }),
+      usage: usage
         ? {
-            inputTokens: data.usage.prompt_tokens,
-            outputTokens: data.usage.completion_tokens,
-            cachedInputTokens: data.usage.prompt_tokens_details?.cached_tokens || undefined,
+            inputTokens: count(usage.prompt_tokens),
+            outputTokens: count(usage.completion_tokens),
+            cachedInputTokens: (isRecord(usage.prompt_tokens_details) ? count(usage.prompt_tokens_details.cached_tokens) : 0) || undefined,
           }
         : undefined,
     };

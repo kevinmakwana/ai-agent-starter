@@ -1,4 +1,5 @@
 import type { ChatMessage, ChatProvider, Completion, ToolCall } from '../agent/types';
+import { isRecord } from './wire';
 
 const EMAIL = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/;
 const ORDER_ID = /(?:order\s*(?:number|no\.?|id)?\s*#?\s*|#)(\d+)/i;
@@ -10,6 +11,34 @@ const WANTS_TRACK =
   /\b(track|tracking|shipment|where(?:'s| is)(?: my)?(?: order| package| parcel)|has (?:it|my order) shipped|delivery status)/i;
 const WANTS_TICKET = /\b(ticket|complain|escalat)|speak (?:to|with) (?:a )?(?:human|person|manager)/i;
 const WANTS_ORDERS = /\b(my orders|order history|recent orders|list (?:my )?orders|what did i (?:order|buy))/i;
+
+interface MockOrder {
+  id: number;
+  status: string;
+  total: number;
+  items: { qty: number; name: string }[];
+}
+
+/** The fields of our own tools' results that the planner reads. Every one is optional: a result may be an error. */
+interface ToolResult {
+  error?: string;
+  message?: string;
+  status?: string;
+  amount?: number;
+  orderId?: number;
+  order?: MockOrder;
+  orders?: MockOrder[];
+  refundedTotal?: number;
+  refundableRemaining?: number;
+  customer?: { name: string };
+  ticket?: { id: number };
+  shipped?: boolean;
+  orderStatus?: string;
+  carrier?: string;
+  trackingNumber?: string;
+  eta?: string | null;
+  events?: { description: string; location: string }[];
+}
 
 const money = (n: unknown) => `$${Number(n).toFixed(2)}`;
 const approxTokens = (s: string) => Math.ceil(s.length / 4);
@@ -40,9 +69,9 @@ function plan(messages: ChatMessage[]): Completion {
   const turn = messages.slice(lastUser + 1);
 
   // tool calls already made in this turn, paired with their parsed results
-  const results = new Map<string, any>();
+  const results = new Map<string, ToolResult>();
   for (const m of turn) if (m.role === 'tool') results.set(m.toolCallId!, safeParse(m.content));
-  const done = turn.flatMap((m) => m.toolCalls ?? []).map((c) => ({ call: c, result: results.get(c.id) }));
+  const done = turn.flatMap((m) => m.toolCalls ?? []).map((c) => ({ call: c, result: results.get(c.id) ?? {} }));
   const last = done[done.length - 1];
   const has = (name: string) => done.some((d) => d.call.name === name);
   const call = (name: string, args: Record<string, unknown>, thought: string): Completion => ({
@@ -65,6 +94,7 @@ function plan(messages: ChatMessage[]): Completion {
     if (!has('get_order')) return call('get_order', { orderId }, `I'll check order #${orderId} before requesting a refund.`);
     if (!has('issue_refund')) {
       const { order, refundableRemaining } = last!.result;
+      if (!order) return say("I couldn't read that order.");
       const refund = amount ?? refundableRemaining;
       return call(
         'issue_refund',
@@ -87,6 +117,7 @@ function plan(messages: ChatMessage[]): Completion {
     if (!has('get_order')) return call('get_order', { orderId }, `I'll check order #${orderId} before requesting a cancellation.`);
     if (!has('cancel_order')) {
       const { order } = last!.result;
+      if (!order) return say("I couldn't read that order.");
       return call(
         'cancel_order',
         { orderId, reason: text.replace(/\s+/g, ' ').trim().slice(0, 300) },
@@ -106,7 +137,7 @@ function plan(messages: ChatMessage[]): Completion {
         "I'll open a support ticket so the team can follow up.",
       );
     }
-    return say(`I've opened ticket #${last!.result.ticket.id}. Our team will get back to you by email.`);
+    return say(`I've opened ticket #${last!.result.ticket?.id}. Our team will get back to you by email.`);
   }
 
   if (WANTS_ORDERS.test(text) && !orderId) {
@@ -140,13 +171,14 @@ function plan(messages: ChatMessage[]): Completion {
   if (orderId) {
     if (!has('get_order')) return call('get_order', { orderId }, `Looking up order #${orderId}.`);
     const { order, refundedTotal } = last!.result;
-    const items = order.items.map((i: any) => `${i.qty}× ${i.name}`).join(', ');
+    if (!order) return say("I couldn't read that order.");
+    const items = order.items.map((i) => `${i.qty}× ${i.name}`).join(', ');
     return say(`Order #${order.id} is ${order.status}: ${items}. Total ${money(order.total)}, refunded so far ${money(refundedTotal)}.`);
   }
 
   if (email) {
     if (!has('get_customer')) return call('get_customer', { email }, `Checking the account for ${email}.`);
-    return say(`I found the account for ${last!.result.customer.name}. How can I help?`);
+    return say(`I found the account for ${last!.result.customer?.name}. How can I help?`);
   }
 
   return say(
@@ -156,15 +188,18 @@ function plan(messages: ChatMessage[]): Completion {
   );
 }
 
-function describeOrders(result: any): string {
-  const orders: any[] = result?.orders ?? [];
+function describeOrders(result: ToolResult): string {
+  const orders = result.orders ?? [];
   if (!orders.length) return 'You have no orders yet.';
   return orders.map((o) => `#${o.id} (${o.status}, ${money(o.total)})`).join('; ') + '.';
 }
 
-function safeParse(s: string): any {
+/** Tool results are JSON our own runner stored; anything that is not an object reads as an empty result. */
+function safeParse(s: string): ToolResult {
   try {
-    return JSON.parse(s);
+    const parsed: unknown = JSON.parse(s);
+    // The mock only runs against our tools' output; the interface lists the optional fields it reads.
+    return isRecord(parsed) ? (parsed as ToolResult) : {};
   } catch {
     return {};
   }

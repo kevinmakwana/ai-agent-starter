@@ -35,7 +35,7 @@ export interface Step {
   toolName: string | null;
   toolArgs: unknown;
   toolCallId: string | null;
-  result: any;
+  result: unknown;
   latencyMs: number | null;
   inputTokens: number | null;
   outputTokens: number | null;

@@ -5,7 +5,7 @@ const C = 'c1';
 const notice = (kind: string) => `NOTIFY ${JSON.stringify({ kind, conversationId: C })}`;
 
 /** Records statements as short labels; `respond` returns rows for a statement, or an Error to make it fail. */
-function fakePool(respond: (text: string) => any[] | Error) {
+function fakePool(respond: (text: string) => Record<string, unknown>[] | Error) {
   const calls: string[] = [];
   const run = async (text: string, values?: unknown[]) => {
     const label = /^\s*(BEGIN|COMMIT|ROLLBACK)/.test(text)

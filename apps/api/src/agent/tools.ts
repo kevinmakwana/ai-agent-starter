@@ -10,15 +10,33 @@ export interface ToolContext {
   shop: ShopRepo;
 }
 
-export interface ToolDef {
+/** How a tool is declared: `A` is the shape its `inputSchema` describes. */
+interface ToolSpecOf<A> {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
   /** Risky tools are parked as pending_approval actions unless the approval policy auto-approves the call, in which case it runs inline. */
   risky?: boolean;
   /** Policy checks run before a risky call is parked (createRefund re-checks when it executes). Returns what the approval policy should weigh. */
-  preflight?: (ctx: ToolContext, args: any) => Promise<ApprovalFacts | void>;
-  execute: (ctx: ToolContext, args: any) => Promise<unknown>;
+  preflight?: (ctx: ToolContext, args: A) => Promise<ApprovalFacts | void>;
+  execute: (ctx: ToolContext, args: A) => Promise<unknown>;
+}
+
+/** What the runner holds: arguments are `unknown` here, because only the schema check (validateToolInput) vouches for their shape. */
+export type ToolDef = ToolSpecOf<unknown>;
+
+/**
+ * Declares a tool with typed arguments and erases the type for the registry.
+ * The cast is sound because the runner calls `preflight` and `execute` only with arguments that validateToolInput accepted
+ * against this tool's `inputSchema`, which is written to match `A`.
+ */
+function defineTool<A>(def: ToolSpecOf<A>): ToolDef {
+  const { preflight, execute, ...rest } = def;
+  return {
+    ...rest,
+    ...(preflight && { preflight: (ctx: ToolContext, args: unknown) => preflight(ctx, args as A) }),
+    execute: (ctx: ToolContext, args: unknown) => execute(ctx, args as A),
+  };
 }
 
 /** Bounded by the database's integer column: a larger id must fail validation, not a query. */
@@ -32,7 +50,7 @@ async function loadOwnedOrder(ctx: ToolContext, orderId: number) {
 }
 
 export const TOOLS: ToolDef[] = [
-  {
+  defineTool({
     name: 'get_customer',
     description: 'Look up the customer account by email address.',
     inputSchema: {
@@ -49,8 +67,8 @@ export const TOOLS: ToolDef[] = [
       }
       return { customer };
     },
-  },
-  {
+  }),
+  defineTool({
     name: 'list_orders',
     description: "List all orders (id, status, total, date) for this conversation's customer.",
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
@@ -60,8 +78,8 @@ export const TOOLS: ToolDef[] = [
         orders: orders.map((o) => ({ id: o.id, status: o.status, total: o.total, itemCount: o.items.length, createdAt: o.createdAt })),
       };
     },
-  },
-  {
+  }),
+  defineTool({
     name: 'get_order',
     description: 'Get one order with its items and how much has already been refunded.',
     inputSchema: { type: 'object', properties: { orderId: id }, required: ['orderId'], additionalProperties: false },
@@ -70,8 +88,8 @@ export const TOOLS: ToolDef[] = [
       const refundedTotal = await ctx.shop.totalRefunded(orderId);
       return { order, refundedTotal, refundableRemaining: refundable(order.total, refundedTotal) };
     },
-  },
-  {
+  }),
+  defineTool({
     name: 'create_ticket',
     description: "Open a support ticket for this conversation's customer.",
     inputSchema: {
@@ -87,8 +105,8 @@ export const TOOLS: ToolDef[] = [
       const ticket = await ctx.shop.createTicket({ customerId: ctx.customerId, subject, body });
       return { ticket: { id: ticket.id, status: ticket.status, subject: ticket.subject } };
     },
-  },
-  {
+  }),
+  defineTool<{ orderId: number; amount: number; reason: string; actionId?: string }>({
     name: 'issue_refund',
     description:
       'Request a refund for an order. RISKY: it either issues the refund immediately or queues it for a human reviewer; the result says which. ' +
@@ -115,8 +133,8 @@ export const TOOLS: ToolDef[] = [
       const { refundId, refundedTotal } = await ctx.shop.createRefund({ customerId: ctx.customerId, ...args });
       return { status: 'refunded', refundId, orderId: args.orderId, amount: args.amount, refundedTotal };
     },
-  },
-  {
+  }),
+  defineTool({
     name: 'track_shipment',
     description:
       "Get the shipment status of one of this customer's orders: carrier, tracking number, status, ETA and recent events. " +
@@ -129,8 +147,8 @@ export const TOOLS: ToolDef[] = [
       const { carrier, trackingNumber, status, eta, events } = shipment;
       return { shipped: true, orderId, carrier, trackingNumber, status, eta, events };
     },
-  },
-  {
+  }),
+  defineTool<{ orderId: number; reason: string; actionId?: string }>({
     name: 'cancel_order',
     description:
       'Request cancellation of an order that has not shipped yet and has no refunds. RISKY: cancellations are queued for a human reviewer; ' +
@@ -151,7 +169,7 @@ export const TOOLS: ToolDef[] = [
       // cancelOrder re-runs ownership and cancellability checks inside a row-locking transaction.
       return ctx.shop.cancelOrder({ customerId: ctx.customerId, orderId: args.orderId, actionId: args.actionId });
     },
-  },
+  }),
 ];
 
 export const toolByName = (name: string) => TOOLS.find((t) => t.name === name);

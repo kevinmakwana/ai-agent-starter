@@ -84,7 +84,7 @@ maybe('approval flow (e2e, real Postgres)', () => {
       // full trace: user, thought+call, result, thought+call, result, final answer
       const trace = await http().get(`/conversations/${id}`).expect(200);
       const steps = trace.body.runs[0].steps;
-      expect(steps.map((s: any) => `${s.role}:${s.toolName ?? ''}`)).toEqual([
+      expect(steps.map((s: { role: string; toolName?: string }) => `${s.role}:${s.toolName ?? ''}`)).toEqual([
         'user:',
         'assistant:get_order',
         'tool:get_order',
@@ -114,7 +114,7 @@ maybe('approval flow (e2e, real Postgres)', () => {
     it('enforces guardrails end to end', async () => {
       const id = await newConversation(1);
       const cross = await http().post(`/conversations/${id}/messages`).send({ content: 'Show me order #2' }).expect(201);
-      expect(cross.body.run.steps.find((s: any) => s.role === 'tool').result.code).toBe('CROSS_CUSTOMER');
+      expect(cross.body.run.steps.find((s: { role: string }) => s.role === 'tool').result.code).toBe('CROSS_CUSTOMER');
 
       const over = await http().post(`/conversations/${id}/messages`).send({ content: 'refund order #1 $500' }).expect(201);
       expect(over.body.run.status).toBe('completed');
@@ -128,7 +128,9 @@ maybe('approval flow (e2e, real Postgres)', () => {
       expect(approval.toolArgs.amount).toBe(56.99);
       await pool.query("INSERT INTO refunds (order_id, amount, reason) VALUES (12, 5, 'sneaked in while pending')");
       const res = await http().post(`/approvals/${approval.id}`).send({ decision: 'approve' }).expect(201);
-      expect(res.body.run.steps.find((s: any) => s.role === 'tool' && s.toolName === 'issue_refund').result.code).toBe('OVER_REFUND');
+      expect(
+        res.body.run.steps.find((s: { role: string; toolName?: string }) => s.role === 'tool' && s.toolName === 'issue_refund').result.code,
+      ).toBe('OVER_REFUND');
       const { rows } = await pool.query('SELECT sum(amount)::float AS total FROM refunds WHERE order_id = 12');
       expect(rows[0].total).toBe(15);
     });
@@ -238,7 +240,7 @@ maybe('approval flow (e2e, real Postgres)', () => {
       expect(rejected).toHaveLength(1);
       expect(rejected[0]).toMatchObject({ conversationId: stale, decisionNote: expect.stringContaining('Expired') });
       const pending = (await http().get('/approvals?status=pending')).body;
-      expect(pending.map((a: any) => a.conversationId)).toEqual([fresh]);
+      expect(pending.map((a: { conversationId: string }) => a.conversationId)).toEqual([fresh]);
       const { rows } = await pool.query('SELECT count(*)::int AS n FROM refunds');
       expect(rows[0].n).toBe(1); // only the seed's prior partial refund on order 12; nothing was refunded
       await http().post(`/conversations/${stale}/messages`).send({ content: 'show my recent orders' }).expect(201); // no longer blocked
@@ -407,7 +409,7 @@ maybe('approval flow (e2e, real Postgres)', () => {
       expect(results.map((r) => r.status).sort()).toEqual([201, 409]);
       const trace = await http().get(`/conversations/${id}`).expect(200);
       expect(trace.body.runs).toHaveLength(1);
-      expect(trace.body.runs[0].steps.map((s: any) => s.role)).toEqual(['user', 'assistant']);
+      expect(trace.body.runs[0].steps.map((s: { role: string }) => s.role)).toEqual(['user', 'assistant']);
     });
   });
 
@@ -440,7 +442,9 @@ maybe('approval flow (e2e, real Postgres)', () => {
 
       const trace = (await http().get(`/conversations/${id}`).set(token).expect(200)).body;
       const sum = (key: 'inputTokens' | 'outputTokens') =>
-        trace.runs.flatMap((r: any) => r.steps).reduce((n: number, st: any) => n + (st[key] ?? 0), 0);
+        trace.runs
+          .flatMap((r: { steps: Record<string, number | null>[] }) => r.steps)
+          .reduce((n: number, st: Record<string, number | null>) => n + (st[key] ?? 0), 0);
       expect(sum('inputTokens')).toBeGreaterThan(0);
       expect(trace.usage).toEqual({
         inputTokens: sum('inputTokens'),
@@ -453,7 +457,7 @@ maybe('approval flow (e2e, real Postgres)', () => {
       expect(trace.runs[1].usage).toEqual({ inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedInputTokens: 0 });
 
       const list = (await http().get('/conversations').set(reviewer).expect(200)).body;
-      expect(list.find((c: any) => c.id === id).totalTokens).toBe(trace.usage.totalTokens);
+      expect(list.find((c: { id: string }) => c.id === id).totalTokens).toBe(trace.usage.totalTokens);
     });
   });
 
