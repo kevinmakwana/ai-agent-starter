@@ -67,6 +67,9 @@ async function start(opts: ConstructorParameters<typeof SMTPServer>[0] = {}) {
     },
     ...opts,
   });
+  // A client that refuses our certificate abandons the handshake, which the server reports as an 'error' event; with no
+  // listener that would be an uncaught exception at a timing-dependent moment.
+  server.on('error', () => undefined);
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   servers.push(server);
   return { received, port: (server.server.address() as AddressInfo).port };
@@ -81,7 +84,7 @@ describe('reviewer notification email over real SMTP', () => {
       to: ['rae@acme.test', 'sam@acme.test'],
     });
     await channel.send(note, signal());
-    channel.close?.();
+    await channel.close?.();
 
     expect(received).toHaveLength(1);
     expect(received[0].from).toBe('support@acme.test');
@@ -98,7 +101,7 @@ describe('reviewer notification email over real SMTP', () => {
     const url = `smtp://mailer:${encodeURIComponent('p@ss:w/rd#1')}@127.0.0.1:${port}`;
     const channel = emailChannel({ smtpUrl: url, from: 'support@acme.test', to: ['rae@acme.test'] });
     await channel.send(note, signal());
-    channel.close?.();
+    await channel.close?.();
     expect(received[0].user).toBe('mailer');
   });
 
@@ -113,7 +116,7 @@ describe('reviewer notification email over real SMTP', () => {
       () => null,
       (e: Error) => e,
     );
-    channel.close?.();
+    await channel.close?.();
     expect(err?.message).toBe('email failed (EAUTH)');
     expect(String(err?.message)).not.toContain('wrong-secret');
     expect(received).toHaveLength(0);
@@ -128,7 +131,7 @@ describe('reviewer notification email over real SMTP', () => {
       () => null,
       (e: Error) => e,
     );
-    channel.close?.();
+    await channel.close?.();
     expect(err?.message).toMatch(/^email failed( \([A-Z_]+\))?$/);
     expect(String(err?.message)).not.toContain('127.0.0.1');
   });
@@ -183,7 +186,7 @@ maybeTls('TLS', () => {
     } catch (e) {
       return e as Error;
     } finally {
-      channel.close?.();
+      await channel.close?.();
     }
   };
 
