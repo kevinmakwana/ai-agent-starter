@@ -22,7 +22,8 @@ export default defineConfig({
   workers: 1,
   reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
   use: { baseURL: `http://127.0.0.1:${WEB_PORT}`, trace: 'retain-on-failure' },
-  projects: [{ name: 'chromium', use: { browserName: 'chromium' } }],
+  // PLAYWRIGHT_CHANNEL=chrome runs on an installed Chrome when Playwright's own Chromium is not downloaded.
+  projects: [{ name: 'chromium', use: { browserName: 'chromium', channel: process.env.PLAYWRIGHT_CHANNEL || undefined } }],
   webServer: [
     {
       name: 'api',
