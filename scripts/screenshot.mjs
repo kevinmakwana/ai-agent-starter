@@ -4,7 +4,7 @@
 import { chromium } from 'playwright';
 
 const base = process.env.WEB_URL ?? 'http://localhost:3000';
-const browser = await chromium.launch();
+const browser = await chromium.launch({ channel: process.env.PLAYWRIGHT_CHANNEL || undefined });
 const page = await browser.newPage({ viewport: { width: 1600, height: 940 }, deviceScaleFactor: 2, colorScheme: 'light' });
 
 // customer side

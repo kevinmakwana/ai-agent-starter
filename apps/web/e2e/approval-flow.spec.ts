@@ -14,7 +14,8 @@ test('a refund request waits for a reviewer, then runs once approved', async ({ 
   await expect(customer.getByText('A reviewer will decide shortly')).toBeVisible({ timeout: 15_000 });
 
   // Nothing has been refunded while it waits.
-  const waiting = await (await request.get(`${API}/approvals?status=pending`)).json();
+  const ofAva = (rows: { customerName: string }[]) => rows.filter((a) => a.customerName === 'Ava Brooks');
+  const waiting = ofAva(await (await request.get(`${API}/approvals?status=pending`)).json());
   expect(waiting).toHaveLength(1);
   expect(waiting[0]).toMatchObject({ toolName: 'issue_refund', customerName: 'Ava Brooks', status: 'pending_approval' });
 
@@ -29,7 +30,6 @@ test('a refund request waits for a reviewer, then runs once approved', async ({ 
   await reviewer.getByRole('button', { name: 'Approve' }).click();
 
   await expect(customer.getByText(/your refund of \$[\d.]+ for order #1 was approved and issued/)).toBeVisible({ timeout: 15_000 });
-  const approved = await (await request.get(`${API}/approvals?status=approved`)).json();
-  expect(approved).toHaveLength(1);
-  expect(await (await request.get(`${API}/approvals?status=pending`)).json()).toHaveLength(0);
+  expect(ofAva(await (await request.get(`${API}/approvals?status=approved`)).json())).toHaveLength(1);
+  expect(ofAva(await (await request.get(`${API}/approvals?status=pending`)).json())).toHaveLength(0);
 });

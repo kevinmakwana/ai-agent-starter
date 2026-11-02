@@ -56,6 +56,6 @@
 ## Portfolio plan
 Work that only matters for presenting the project; everything else is tracked in the phases above.
 - [x] P.1 Land the finished Phase 4 work on `main` (4.1 SSE, 4.6 tools, 4.4 notifications), in order, one PR each.
-- [ ] P.4 Portfolio README: architecture diagram, screenshots/GIF, "what this demonstrates", plus the manual browser check of the UI.
+- [x] P.4 Portfolio README: architecture diagram, screenshots/GIF, "what this demonstrates", plus the manual browser check of the UI. (Done as: screenshots regenerated from the current UI, no GIF (no encoder available); the browser check was scripted in Chrome and the live-update parts are now Playwright tests, see README "Known limitations".)
 
 Suggested order for the open phase items: 5.4 (Docker), 5.1 + 5.2 (lint and web tests), P.4, 4.5 (reviewer accounts and four-eyes, then customer login), 5.8 (evals), 5.6, 5.5, 5.3 + 5.7, 3.6 (needs a live `ANTHROPIC_API_KEY`).
